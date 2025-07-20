@@ -1,4 +1,3 @@
-"""Coordinate utilities used by the interpolation program"""
 import logging
 
 import numpy as np
@@ -8,9 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 def align_path(path):
-    """Rotate and translate images to minimize RMSD movements along the path.
-    Also moves the geometric center of all images to the origin.
-    """
     path = np.array(path)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0
@@ -21,18 +17,6 @@ def align_path(path):
 
 
 def align_geom(refgeom, geom):
-    """Find translation/rotation that moves a given geometry to maximally overlap
-    with a reference geometry. Implemented with Kabsch algorithm.
-
-    Args:
-        refgeom:    The reference geometry to be rotated to
-        geom:       The geometry to be rotated and shifted
-
-    Returns:
-        RMSD:       Root-mean-squared difference between the rotated geometry
-                    and the reference
-        new_geom:   The rotated geometry that maximumally overal with the reference
-    """
     center = np.mean(refgeom, axis=0)  # Find the geometric center
     ref2 = refgeom - center
     geom2 = geom - np.mean(geom, axis=0)
@@ -47,31 +31,33 @@ def align_geom(refgeom, geom):
     return rmsd, new_geom
 
 
-ATOMIC_RADIUS = dict(H=0.31, He=0.28,
-                     Li=1.28, Be=0.96, B=0.84, C=0.76, N=0.71, O=0.66, F=0.57, Ne=0.58,
-                     Na=1.66, Mg=1.41, Al=1.21, Si=1.11, P=1.07, S=1.05, Cl=1.02, Ar=1.06)
+ATOMIC_RADIUS = dict(H=0.31,
+                     He=0.28,
+                     Li=1.28,
+                     Be=0.96,
+                     B=0.84,
+                     C=0.76,
+                     N=0.71,
+                     O=0.66,
+                     F=0.57,
+                     Ne=0.58,
+                     Na=1.66,
+                     Mg=1.41,
+                     Al=1.21,
+                     Si=1.11,
+                     P=1.07,
+                     S=1.05,
+                     Cl=1.02,
+                     Ar=1.06)
 
 
-def get_bond_list(geom, atoms=None, threshold=4, min_neighbors=4, snapshots=30, bond_threshold=1.8,
+def get_bond_list(geom,
+                  atoms=None,
+                  threshold=4,
+                  min_neighbors=4,
+                  snapshots=30,
+                  bond_threshold=1.8,
                   enforce=()):
-    """Get the list of all the important atom pairs.
-    Samples a number of snapshots from a list of geometries to generate all
-    distances that are below a given threshold in any of them.
-
-    Args:
-        atoms:      Symbols for each atoms.
-        geom:       One or a list of geometries to check for pairs
-        threshold:  Threshold for including a bond in the bond list
-        min_neighbors: Minimum number of neighbors to include for each atom.
-                    If an atom has smaller than this number of bonds, additional
-                    distances will be added to reach this number.
-        snapshots:  Number of snapshots to be used in the generation, useful
-                    for speeding up the process if the path is long and
-                    atoms numerous.
-
-    Returns:
-        List of all the included interatomic distance pairs.
-    """
     # Type casting and value checks on input parameters
     geom = np.asarray(geom)
     if len(geom.shape) < 3:
@@ -132,19 +118,6 @@ def get_bond_list(geom, atoms=None, threshold=4, min_neighbors=4, snapshots=30, 
 
 
 def compute_rij(geom, rij_list):
-    """Calculate a list of distances and their derivatives
-
-    Takes a set of cartesian geometries then calculate selected distances and their
-    cartesian gradients given a list of atom pairs.
-
-    Args:
-        geom: Cartesian geometry of all the points.  Must be 2d numpy array or list
-            with shape (natoms, 3)
-        rij_list: list of indexes of all the atom pairs
-
-    Returns:
-        rij (array): Array of all the distances.
-        bmat (3d array): Cartesian gradients of all the distances."""
     nrij = len(rij_list)
     rij = np.zeros(nrij)
     bmat = np.zeros((nrij, len(geom), 3))
@@ -159,23 +132,6 @@ def compute_rij(geom, rij_list):
 
 
 def compute_wij(geom, rij_list, func):
-    """Calculate a list of scaled distances and their derivatives
-
-    Takes a set of cartesian geometries then calculate selected distances and their
-    cartesian gradients given a list of atom pairs.  The distances are scaled with
-    a given scaling function.
-
-    Args:
-        geom: Cartesian geometry of all the points.  Must be 2d numpy array or list
-            with shape (natoms, 3)
-        rij_list: 2d numpy array of indexes of all the atom pairs
-        func: A scaling function, which returns both the value and derivative.  Must
-            qualify as a numpy Ufunc in order to be broadcasted to array elements.
-
-    Returns:
-        wij (array): Array of all the scaled distances.
-        bmat (2d array): Cartesian gradients of all the scaled distances, with the
-            second dimension flattened (need this to be used in scipy.optimize)."""
     geom = np.asarray(geom).reshape(-1, 3)
     nrij = len(rij_list)
     rij, bmat = compute_rij(geom, rij_list)
@@ -186,13 +142,6 @@ def compute_wij(geom, rij_list, func):
 
 
 def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
-    """Returns a scaling function that determines the metric of the internal
-    coordinates using morse potential
-
-    Takes an internuclear distance, returns the scaled distance, and the
-    derivative of the scaled distance with respect to the unscaled one.
-    """
-
     def scaler(x):
         ratio = x / re
         val1 = np.exp(alpha * (1 - ratio))
@@ -204,13 +153,6 @@ def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
 
 
 def elu_scaler(re=2, alpha=2, beta=0.01):
-    """Returns a scaling function that determines the metric of the internal
-    coordinates using morse potential
-
-    Takes an internuclear distance, returns the scaled distance, and the
-    derivative of the scaled distance with respect to the unscaled one.
-    """
-
     def scaler(x):
         val1 = (1 - x / re) * alpha + 1
         dval = np.full(x.shape, -alpha / re)

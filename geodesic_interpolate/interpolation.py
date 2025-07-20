@@ -1,7 +1,3 @@
-"""Simplified geodesic interpolations module, which uses geodesic lengths as criteria
-to add bisection points until point count meet desired number.
-Will need another following geodesic smoothing to get final path.
-"""
 import logging
 
 import numpy as np
@@ -14,31 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 def mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
-    """Find the Cartesian geometry that has internal coordinate values closest to the average of
-    two geometries.
-
-    Simply perform a least-squares minimization on the difference between the current internal
-    and the average of the two end points.  This is done twice, using either end point as the
-    starting guess.  DON'T USE THE CARTESIAN AVERAGE AS GUESS, THINGS WILL BLOW UP.
-
-    This is used to generate an initial guess path for the later smoothing routine.
-    Genenrally, the added point may not be continuous with the both end points, but
-    provides a good enough starting guess.
-
-    Random nudges are added to the initial geometry, so running multiple times may not yield
-    the same converged geometry. For larger systems, one will never get the same geometry
-    twice.  So one may want to perform multiple runs and check which yields the best result.
-
-    Args:
-        geom1, geom2:   Cartesian geometry of the end points
-        tol:    Convergence tolarnce for the least-squares minimization process
-        nudge:  Random nudges added to the initial geometry, which helps to discover different
-                solutions.  Also helps in cases where optimal paths break the symmetry.
-        threshold:  Threshold for including an atom-pair in the coordinate system
-
-    Returns:
-        Optimized mid-point which bisects the two endpoints in internal coordinates
-    """
     # Process the initial geometries, construct coordinate system and obtain average internals
     geom1, geom2 = np.array(geom1), np.array(geom2)
     add_pair = set()
@@ -101,19 +72,6 @@ def mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
 
 
 def redistribute(atoms, geoms, nimages, tol=1e-2):
-    """Add or remove images so that the path length matches the desired number.
-
-    If the number is too few, new points are added by bisecting the largest RMSD. If too numerous,
-    one image is removed at a time so that the new merged segment has the shortest RMSD.
-
-    Args:
-        geoms:      Geometry of the original path.
-        nimages:    The desired number of images
-        tol:        Convergence tolerance for bisection.
-
-    Returns:
-        An aligned and redistributed path with has the correct number of images.
-    """
     _, geoms = align_path(geoms)
     geoms = list(geoms)
     # If there are too few images, add bisection points

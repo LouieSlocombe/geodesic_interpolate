@@ -1,7 +1,3 @@
-"""Geodesic smoothing.   Minimize the path length using redundant internal coordinate
-metric to find geodesics directly in Cartesian, to avoid feasibility problems associated
-with redundant internals.
-"""
 import logging
 
 import numpy as np
@@ -13,26 +9,15 @@ logger = logging.getLogger(__name__)
 
 
 class Geodesic(object):
-    """Optimizer to obtain geodesic in redundant internal coordinates.  Core part is the calculation
-    of the path length in the internal metric."""
 
-    def __init__(self, atoms, path, scaler=1.7, threshold=3, min_neighbors=4, log_level=logging.INFO,
+    def __init__(self,
+                 atoms,
+                 path,
+                 scaler=1.7,
+                 threshold=3,
+                 min_neighbors=4,
+                 log_level=logging.INFO,
                  friction=1e-3):
-        """Initialize the interpolater
-        Args:
-            atoms:      Atom symbols, used to lookup radii
-            path:       Initial geometries of the path, must be of dimension `nimage * natoms * 3`
-            scaler:     Either the alpha parameter for morse potential, or an explicit scaling function.
-                        It is easier to get smoother paths with small number of data points using small
-                        scaling factors, as they have large range, but larger values usually give
-                        better energetics because they better represent the (sharp) energy landscape.
-            threshold:  Distance cut-off for constructing inter-nuclear distance coordinates.  Note that
-                        any atoms linked by three or less bonds will also be added.
-            min_neighbors:  Minimum number of neighbors an atom must have in the atom pair list.
-            log_level:  Logging level to use.
-            friction:   Friction term in the target function which regularizes the optimization step
-                        size to prevent explosion.
-        """
         rmsd0, self.path = align_path(path)
         logger.log(log_level, "Maximum RMSD change in initial path: %10.2f", rmsd0)
         if self.path.ndim != 3:
@@ -59,10 +44,6 @@ class Geodesic(object):
         self.conv_path = []
 
     def update_intc(self):
-        """Adjust unknown locations of mid points and compute missing values of internal coordinates
-        and their derivatives.  Any missing values will be marked with None values in internal storage,
-        and this routine finds and calculates them.  This is to avoid redundant evaluation of value and
-        gradients of internal coordinates."""
         for i, (X, w, dwdR) in enumerate(zip(self.path, self.w, self.dwdR)):
             if w is None:
                 self.w[i], self.dwdR[i] = compute_wij(X, self.rij_list, self.scaler)
@@ -72,8 +53,6 @@ class Geodesic(object):
                 self.w_mid[i], self.dwdR_mid[i] = compute_wij(Xm, self.rij_list, self.scaler)
 
     def update_geometry(self, X, start, end):
-        """Update the geometry of a segment of the path, then set the corresponding internal
-        coordinate, derivatives and midpoint locations to unknown"""
         X = X.reshape(self.path[start:end].shape)
         if np.array_equal(X, self.path[start:end]):
             return False
@@ -84,8 +63,6 @@ class Geodesic(object):
         return True
 
     def compute_disps(self, start=1, end=-1, dx=None, friction=1e-3):
-        """Compute displacement vectors and total length between two images.
-        Only recalculate internal coordinates if they are unknown."""
         if end < 0:
             end += self.nimages
         self.update_intc()
@@ -101,7 +78,6 @@ class Geodesic(object):
         self.disps0 = self.disps[:len(vecs_l) * 2]
 
     def compute_disp_grad(self, start, end, friction=1e-3):
-        """Compute derivatives of the displacement vectors with respect to the Cartesian coordinates"""
         # Calculate derivatives of displacement vectors with respect to image Cartesians
         l = end - start + 1
         self.grad = np.zeros((l * 2 * self.nrij + 3 * (end - start) * self.natoms, (end - start) * 3 * self.natoms))
@@ -120,8 +96,6 @@ class Geodesic(object):
             self.grad[l * self.nrij * 2 + idx, idx] = friction
 
     def compute_target_func(self, X=None, start=1, end=-1, log_level=logging.INFO, x0=None, friction=1e-3):
-        """Compute the vectorized target function, which is then used for least
-        squares minimization."""
         if end < 0:
             end += self.nimages
         if X is not None and not self.update_geometry(X, start, end) and self.segment == (start, end):
@@ -136,32 +110,22 @@ class Geodesic(object):
         self.neval += 1
 
     def target_func(self, X, **kwargs):
-        """Wrapper around `compute_target_func` to prevent repeated evaluation at
-        the same geometry"""
         self.compute_target_func(X, **kwargs)
         return self.disps
 
     def target_deriv(self, X, **kwargs):
-        """Wrapper around `compute_target_func` to prevent repeated evaluation at
-        the same geometry"""
         self.compute_target_func(X, **kwargs)
         return self.grad
 
-    def smooth(self, tol=1e-3, max_iter=50, start=1, end=-1, log_level=logging.INFO, friction=None,
+    def smooth(self,
+               tol=1e-3,
+               max_iter=50,
+               start=1,
+               end=-1,
+               log_level=logging.INFO,
+               friction=None,
                xref=None):
-        """Minimize the path length as an overall function of the coordinates of all the images.
-        This should in principle be very efficient, but may be quite costly for large systems with
-        many images.
 
-        Args:
-            tol:        Convergence tolerance of the optimality. (.i.e uniform gradient of target func)
-            max_iter:   Maximum number of iterations to run.
-            start, end: Specify which section of the path to optimize.
-            log_level:  Logging level during the optimization
-
-        Returns:
-            The optimized path.  This is also stored in self.path
-        """
         X0 = np.array(self.path[start:end]).ravel()
         if xref is None:
             xref = X0
@@ -183,22 +147,12 @@ class Geodesic(object):
         logger.log(log_level, "Final path length: %12.5f  Max RMSD in path: %10.2f", self.length, rmsd)
         return self.path
 
-    def sweep(self, tol=1e-3, max_iter=50, micro_iter=20, start=1, end=-1):
-        """Minimize the path length by adjusting one image at a time and sweeping the optimization
-        side across the chain.  This is not as efficient, but scales much more friendly with the
-        size of the system given the slowness of scipy's optimizers.  Also allows more detailed
-        control and easy way of skipping nearly optimal points than the overall case.
-
-        Args:
-            tol:        Convergence tolerance of the optimality. (.i.e uniform gradient of target func)
-            max_iter:   Maximum number of sweeps through the path.
-            micro_iter: Number of micro-iterations to be performed when optimizing each image.
-            start, end: Specify which section of the path to optimize.
-            log_level:  Logging level during the optimization
-
-        Returns:
-            The optimized path.  This is also stored in self.path
-        """
+    def sweep(self,
+              tol=1e-3,
+              max_iter=50,
+              micro_iter=20,
+              start=1,
+              end=-1):
         if end < 0:
             end = self.nimages + end
         self.neval = 0
