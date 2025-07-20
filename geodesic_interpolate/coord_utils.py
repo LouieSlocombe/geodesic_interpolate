@@ -10,15 +10,15 @@ def align_path(path):
     path = np.array(path)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0
-    for g, nextg in zip(path, path[1:]):
-        rmsd, nextg[:] = align_geom(g, nextg)
+    for g, next_g in zip(path, path[1:]):
+        rmsd, next_g[:] = align_geom(g, next_g)
         max_rmsd = max(max_rmsd, rmsd)
     return max_rmsd, path
 
 
-def align_geom(refgeom, geom):
-    center = np.mean(refgeom, axis=0)  # Find the geometric center
-    ref2 = refgeom - center
+def align_geom(ref_geom, geom):
+    center = np.mean(ref_geom, axis=0)
+    ref2 = ref_geom - center
     geom2 = geom - np.mean(geom, axis=0)
     cov = np.dot(geom2.T, ref2)
     v, sv, w = np.linalg.svd(cov)
@@ -27,7 +27,7 @@ def align_geom(refgeom, geom):
         v[:, -1] = -v[:, -1]
     u = np.dot(v, w)
     new_geom = np.dot(geom2, u) + center
-    rmsd = np.sqrt(np.mean((new_geom - refgeom) ** 2))
+    rmsd = np.sqrt(np.mean((new_geom - ref_geom) ** 2))
     return rmsd, new_geom
 
 
@@ -71,11 +71,11 @@ def get_bond_list(geom,
     if snapshots > 2:
         images.extend(np.random.choice(range(1, snapshots - 1), snapshots - 2, replace=False))
     # Get neighbor list for included geometry and merge them
-    rijset = set(enforce)
+    rij_set = set(enforce)
     for image in images:
         tree = KDTree(geom[image])
         pairs = tree.query_pairs(threshold)
-        rijset.update(pairs)
+        rij_set.update(pairs)
         bonded = tree.query_pairs(bond_threshold)
         neighbors = {i: {i} for i in range(geom.shape[1])}
         for i, j in bonded:
@@ -86,12 +86,12 @@ def get_bond_list(geom,
                 for nj in neighbors[j]:
                     if ni != nj:
                         pair = tuple(sorted([ni, nj]))
-                        if pair not in rijset:
-                            rijset.add(pair)
-    rijlist = sorted(rijset)
+                        if pair not in rij_set:
+                            rij_set.add(pair)
+    rij_list = sorted(rij_set)
     # Check neighbor count to make sure `min_neighbors` is satisfied
     count = np.zeros(geom.shape[1], dtype=int)
-    for i, j in rijlist:
+    for i, j in rij_list:
         count[i] += 1
         count[j] += 1
     for idx, ct in enumerate(count):
@@ -101,44 +101,45 @@ def get_bond_list(geom,
                 if i == idx:
                     continue
                 pair = tuple(sorted([i, idx]))
-                if pair in rijset:
+                if pair in rij_set:
                     continue
                 else:
-                    rijset.add(pair)
-                    rijlist.append(pair)
+                    rij_set.add(pair)
+                    rij_list.append(pair)
                     count[i] += 1
                     count[idx] += 1
     if atoms is None:
-        re = np.full(len(rijlist), 2.0)
+        re = np.full(len(rij_list), 2.0)
     else:
         radius = np.array([ATOMIC_RADIUS.get(atom.capitalize(), 1.5) for atom in atoms])
-        re = np.array([radius[i] + radius[j] for i, j in rijlist])
-    logger.debug("Pair list contain %d pairs", len(rijlist))
-    return rijlist, re
+        re = np.array([radius[i] + radius[j] for i, j in rij_list])
+    logger.debug("Pair list contain %d pairs", len(rij_list))
+    return rij_list, re
 
 
 def compute_rij(geom, rij_list):
-    nrij = len(rij_list)
-    rij = np.zeros(nrij)
-    bmat = np.zeros((nrij, len(geom), 3))
+    n_rij = len(rij_list)
+    rij = np.zeros(n_rij)
+    b_mat = np.zeros((n_rij, len(geom), 3))
     for idx, (i, j) in enumerate(rij_list):
-        dvec = geom[i] - geom[j]
-        rij[idx] = r = np.sqrt(dvec[0] * dvec[0] +
-                               dvec[1] * dvec[1] + dvec[2] * dvec[2])
-        grad = dvec / r
-        bmat[idx, i] = grad
-        bmat[idx, j] = -grad
-    return rij, bmat
+        d_vec = geom[i] - geom[j]
+        rij[idx] = r = np.sqrt(d_vec[0] * d_vec[0] +
+                               d_vec[1] * d_vec[1] +
+                               d_vec[2] * d_vec[2])
+        grad = d_vec / r
+        b_mat[idx, i] = grad
+        b_mat[idx, j] = -grad
+    return rij, b_mat
 
 
 def compute_wij(geom, rij_list, func):
     geom = np.asarray(geom).reshape(-1, 3)
-    nrij = len(rij_list)
-    rij, bmat = compute_rij(geom, rij_list)
-    wij, dwdr = func(rij)
-    for idx, grad in enumerate(dwdr):
-        bmat[idx] *= grad
-    return wij, bmat.reshape(nrij, -1)
+    n_rij = len(rij_list)
+    rij, b_mat = compute_rij(geom, rij_list)
+    wij, d_wdr = func(rij)
+    for idx, grad in enumerate(d_wdr):
+        b_mat[idx] *= grad
+    return wij, b_mat.reshape(n_rij, -1)
 
 
 def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
@@ -146,8 +147,8 @@ def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
         ratio = x / re
         val1 = np.exp(alpha * (1 - ratio))
         val2 = beta / ratio
-        dval = -alpha / re * val1 - val2 / x
-        return val1 + val2, dval
+        d_val = -alpha / re * val1 - val2 / x
+        return val1 + val2, d_val
 
     return scaler
 
@@ -155,12 +156,12 @@ def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
 def elu_scaler(re=2, alpha=2, beta=0.01):
     def scaler(x):
         val1 = (1 - x / re) * alpha + 1
-        dval = np.full(x.shape, -alpha / re)
+        d_val = np.full(x.shape, -alpha / re)
         large = x > re
         v1l = np.exp(alpha * (1 - x[large] / re))
         val1[large] = v1l
-        dval[large] = -alpha / re * v1l
+        d_val[large] = -alpha / re * v1l
         val2 = beta * re / x
-        return val1 + val2, dval - val2 / x
+        return val1 + val2, d_val - val2 / x
 
     return scaler

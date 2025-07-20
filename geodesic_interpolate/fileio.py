@@ -6,11 +6,11 @@ def read_xyz(filename):
     with open(filename, 'r') as f:
         for line in f:
             try:
-                natm = int(line)  # Read number of atoms
+                n_atoms = int(line)  # Read number of atoms
                 next(f)  # Skip over comments
                 atom_names = []
-                geom = np.zeros((natm, 3), float)
-                for i in range(natm):
+                geom = np.zeros((n_atoms, 3), float)
+                for i in range(n_atoms):
                     line = next(f).split()
                     atom_names.append(line[0])
                     geom[i] = line[1:4]  # Numpy auto-converts str to float
@@ -23,10 +23,10 @@ def read_xyz(filename):
 
 
 def write_xyz(filename, atoms, coords):
-    natoms = len(atoms)
+    n_atoms = len(atoms)
     with open(filename, 'w') as f:
         for i, X in enumerate(np.atleast_3d(coords)):
-            f.write("%d\n" % natoms)
+            f.write("%d\n" % n_atoms)
             f.write("Frame %d\n" % i)
             for a, Xa in zip(atoms, X):
                 f.write(" {:3} {:21.12f} {:21.12f} {:21.12f}\n".format(a, *Xa))
