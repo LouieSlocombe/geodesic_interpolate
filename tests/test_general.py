@@ -1,8 +1,21 @@
+from ase.io import read
+from ase.visualize import view
+
 import geodesic_interpolate as gi
 
 
 def test_case_ch():
-    # H+CH4_CH3+H2.xyz
+    gi.interpolate("data/H+CH4_CH3+H2.xyz")
+
+    # atoms = read("data/H+CH4_CH3+H2.xyz", index=':')
+    # view(atoms)
+
+    # atoms = read("data/H+CH4_CH3+H2_interpolated.xyz", index=':')
+    # view(atoms)
+
+    atoms = read("interpolated.xyz", index=':')
+    view(atoms)
+
     pass
 
 
