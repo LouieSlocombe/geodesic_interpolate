@@ -1,4 +1,3 @@
-import argparse
 import logging
 
 from .fileio import read_xyz, write_xyz
@@ -8,62 +7,46 @@ from .interpolation import redistribute
 logger = logging.getLogger(__name__)
 
 
-def interpolate():
-    ps = argparse.ArgumentParser(description="Interpolates between two geometries",
-                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    ps.add_argument("filename", type=str, help="XYZ file containing geometries. If the number of images "
-                                               "is smaller than the desired number, interpolation points will be added.  If the "
-                                               "number is greater, subsampling will be performed.")
-    ps.add_argument("--nimages", type=int, default=17, help="Number of images.")
-    ps.add_argument("--sweep", action="store_true", help="Sweep across the path optimizing one image at "
-                                                         "a time, instead of moving all images at the same time.  Default is to perform sweeping "
-                                                         "updates if there are more than 30 atoms.")
-    ps.add_argument("--no-sweep", dest='sweep', action="store_false", help="Do not perform sweeping.")
-    ps.set_defaults(sweep=None)
-    ps.add_argument("--output", default="interpolated.xyz", type=str, help="Output filename. "
-                                                                           "Default is interp.xyz")
-    ps.add_argument("--tol", default=2e-3, type=float, help="Convergence tolerance")
-    ps.add_argument("--maxiter", default=15, type=int, help="Maximum number of minimization iterations")
-    ps.add_argument("--microiter", default=20, type=int, help="Maximum number of micro iterations for "
-                                                              "sweeping algorithm.")
-    ps.add_argument("--scaling", default=1.7, type=float, help="Exponential parameter for morse potential")
-    ps.add_argument("--friction", default=1e-2, type=float, help="Size of friction term used to prevent "
-                                                                 "very large change of geometry.")
-    ps.add_argument("--dist-cutoff", dest='dist_cutoff', default=3, type=float, help="Cut-off value for the "
-                                                                                     "distance between a pair of atoms to be included in the coordinate system.")
-    ps.add_argument("--logging", default="INFO", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                    help="Logging level to adopt [ DEBUG | INFO | WARNING | ERROR ]")
-    ps.add_argument("--save-raw", dest='save_raw', default=None, type=str, help="When specified, save the "
-                                                                                "raw path after bisections be before smoothing.")
-    args = ps.parse_args()
-
+def interpolate(
+        filename,
+        n_images=17,
+        sweep=None,
+        output="interpolated.xyz",
+        tol=2e-3,
+        max_iter=15,
+        micro_iter=20,
+        scaling=1.7,
+        friction=1e-2,
+        dist_cutoff=3,
+        logging_level="INFO",
+        save_raw=None
+):
     # Setup logging based on designated logging level
-    logging.basicConfig(format="[%(module)-12s]%(message)s", level=args.logging)
+    logging.basicConfig(format="[%(module)-12s]%(message)s", level=logging_level)
 
     # Read the initial geometries.
-    symbols, X = read_xyz(args.filename)
-    logger.info('Loaded %d geometries from %s', len(X), args.filename)
-    if len(X) < 2:
+    symbols, geometries = read_xyz(filename)
+    logger.info('Loaded %d geometries from %s', len(geometries), filename)
+    if len(geometries) < 2:
         raise ValueError("Need at least two initial geometries.")
 
     # First redistribute number of images.  Perform interpolation if too few and subsampling if too many
     # images are given
-    raw = redistribute(symbols, X, args.nimages, tol=args.tol * 5)
-    if args.save_raw is not None:
-        write_xyz(args.save_raw, symbols, raw)
+    raw = redistribute(symbols, geometries, n_images, tol=tol * 5)
+    if save_raw is not None:
+        write_xyz(save_raw, symbols, raw)
 
     # Perform smoothing by minimizing distance in Cartesian coordinates with redundant internal metric
     # to find the appropriate geodesic curve on the hyperspace.
-    smoother = Geodesic(symbols, raw, args.scaling, threshold=args.dist_cutoff, friction=args.friction)
-    if args.sweep is None:
-        args.sweep = len(symbols) > 35
+    smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction)
+    if sweep is None:
+        sweep = len(symbols) > 35
     try:
-        if args.sweep:
-            smoother.sweep(tol=args.tol, max_iter=args.maxiter, micro_iter=args.microiter)
+        if sweep:
+            smoother.sweep(tol=tol, max_iter=max_iter, micro_iter=micro_iter)
         else:
-            smoother.smooth(tol=args.tol, max_iter=args.maxiter)
+            smoother.smooth(tol=tol, max_iter=max_iter)
     finally:
-        # Save the smoothed path to output file.  try block is to ensure output is saved if one ^C the
-        # process, or there is an error
-        logging.info('Saving final path to file %s', args.output)
-        write_xyz(args.output, symbols, smoother.path)
+        # Save the smoothed path to output file.
+        logging.info('Saving final path to file %s', output)
+        write_xyz(output, symbols, smoother.path)

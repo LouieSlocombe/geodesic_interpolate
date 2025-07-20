@@ -1,2 +1,1 @@
-from .geodesic import Geodesic
-from .interpolation import redistribute
+from .geodesic_interpolate import interpolate
