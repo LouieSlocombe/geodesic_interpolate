@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+from ase.data import atomic_numbers, covalent_radii
 from scipy.spatial import KDTree
 
 logger = logging.getLogger(__name__)
@@ -31,26 +32,6 @@ def align_geom(ref_geom, geom):
     return rmsd, new_geom
 
 
-ATOMIC_RADIUS = dict(H=0.31,
-                     He=0.28,
-                     Li=1.28,
-                     Be=0.96,
-                     B=0.84,
-                     C=0.76,
-                     N=0.71,
-                     O=0.66,
-                     F=0.57,
-                     Ne=0.58,
-                     Na=1.66,
-                     Mg=1.41,
-                     Al=1.21,
-                     Si=1.11,
-                     P=1.07,
-                     S=1.05,
-                     Cl=1.02,
-                     Ar=1.06)
-
-
 def get_bond_list(geom,
                   atoms=None,
                   threshold=4,
@@ -58,19 +39,15 @@ def get_bond_list(geom,
                   snapshots=30,
                   bond_threshold=1.8,
                   enforce=()):
-    # Type casting and value checks on input parameters
     geom = np.asarray(geom)
     if len(geom.shape) < 3:
-        # If there is only one geometry or it is flattened, promote to 3d
         geom = geom.reshape(1, -1, 3)
     min_neighbors = min(min_neighbors, geom.shape[1] - 1)
 
-    # Determine which images to be used to determine distances
     snapshots = min(len(geom), snapshots)
     images = [0, len(geom) - 1]
     if snapshots > 2:
         images.extend(np.random.choice(range(1, snapshots - 1), snapshots - 2, replace=False))
-    # Get neighbor list for included geometry and merge them
     rij_set = set(enforce)
     for image in images:
         tree = KDTree(geom[image])
@@ -89,7 +66,6 @@ def get_bond_list(geom,
                         if pair not in rij_set:
                             rij_set.add(pair)
     rij_list = sorted(rij_set)
-    # Check neighbor count to make sure `min_neighbors` is satisfied
     count = np.zeros(geom.shape[1], dtype=int)
     for i, j in rij_list:
         count[i] += 1
@@ -111,7 +87,9 @@ def get_bond_list(geom,
     if atoms is None:
         re = np.full(len(rij_list), 2.0)
     else:
-        radius = np.array([ATOMIC_RADIUS.get(atom.capitalize(), 1.5) for atom in atoms])
+        # Use covalent_radii from ase.data
+        atom_numbers = [atomic_numbers[atom.capitalize()] for atom in atoms]
+        radius = np.array([covalent_radii[num] for num in atom_numbers])
         re = np.array([radius[i] + radius[j] for i, j in rij_list])
     logger.debug("Pair list contain %d pairs", len(rij_list))
     return rij_list, re
