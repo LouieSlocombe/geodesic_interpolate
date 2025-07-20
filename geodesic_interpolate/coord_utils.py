@@ -4,7 +4,6 @@ import logging
 import numpy as np
 from scipy.spatial import KDTree
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +33,7 @@ def align_geom(refgeom, geom):
                     and the reference
         new_geom:   The rotated geometry that maximumally overal with the reference
     """
-    center = np.mean(refgeom, axis=0)   # Find the geometric center
+    center = np.mean(refgeom, axis=0)  # Find the geometric center
     ref2 = refgeom - center
     geom2 = geom - np.mean(geom, axis=0)
     cov = np.dot(geom2.T, ref2)
@@ -193,12 +192,14 @@ def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
     Takes an internuclear distance, returns the scaled distance, and the
     derivative of the scaled distance with respect to the unscaled one.
     """
+
     def scaler(x):
         ratio = x / re
         val1 = np.exp(alpha * (1 - ratio))
         val2 = beta / ratio
         dval = -alpha / re * val1 - val2 / x
         return val1 + val2, dval
+
     return scaler
 
 
@@ -209,6 +210,7 @@ def elu_scaler(re=2, alpha=2, beta=0.01):
     Takes an internuclear distance, returns the scaled distance, and the
     derivative of the scaled distance with respect to the unscaled one.
     """
+
     def scaler(x):
         val1 = (1 - x / re) * alpha + 1
         dval = np.full(x.shape, -alpha / re)
@@ -218,4 +220,5 @@ def elu_scaler(re=2, alpha=2, beta=0.01):
         dval[large] = -alpha / re * v1l
         val2 = beta * re / x
         return val1 + val2, dval - val2 / x
+
     return scaler

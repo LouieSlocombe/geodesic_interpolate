@@ -6,15 +6,12 @@ avoiding unfeasibility.
 
 Xiaolei Zhu et al, Martinez Group, Stanford University
 """
-import logging
 import argparse
-
-import numpy as np
+import logging
 
 from .fileio import read_xyz, write_xyz
-from .interpolation import redistribute
 from .geodesic import Geodesic
-
+from .interpolation import redistribute
 
 logger = logging.getLogger(__name__)
 
@@ -25,29 +22,29 @@ def main():
     ps = argparse.ArgumentParser(description="Interpolates between two geometries",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ps.add_argument("filename", type=str, help="XYZ file containing geometries. If the number of images "
-                    "is smaller than the desired number, interpolation points will be added.  If the "
-                    "number is greater, subsampling will be performed.")
+                                               "is smaller than the desired number, interpolation points will be added.  If the "
+                                               "number is greater, subsampling will be performed.")
     ps.add_argument("--nimages", type=int, default=17, help="Number of images.")
     ps.add_argument("--sweep", action="store_true", help="Sweep across the path optimizing one image at "
-                    "a time, instead of moving all images at the same time.  Default is to perform sweeping "
-                    "updates if there are more than 30 atoms.")
+                                                         "a time, instead of moving all images at the same time.  Default is to perform sweeping "
+                                                         "updates if there are more than 30 atoms.")
     ps.add_argument("--no-sweep", dest='sweep', action="store_false", help="Do not perform sweeping.")
     ps.set_defaults(sweep=None)
     ps.add_argument("--output", default="interpolated.xyz", type=str, help="Output filename. "
-                    "Default is interp.xyz")
+                                                                           "Default is interp.xyz")
     ps.add_argument("--tol", default=2e-3, type=float, help="Convergence tolerance")
     ps.add_argument("--maxiter", default=15, type=int, help="Maximum number of minimization iterations")
     ps.add_argument("--microiter", default=20, type=int, help="Maximum number of micro iterations for "
-                    "sweeping algorithm.")
+                                                              "sweeping algorithm.")
     ps.add_argument("--scaling", default=1.7, type=float, help="Exponential parameter for morse potential")
     ps.add_argument("--friction", default=1e-2, type=float, help="Size of friction term used to prevent "
-                    "very large change of geometry.")
+                                                                 "very large change of geometry.")
     ps.add_argument("--dist-cutoff", dest='dist_cutoff', default=3, type=float, help="Cut-off value for the "
-                    "distance between a pair of atoms to be included in the coordinate system.")
+                                                                                     "distance between a pair of atoms to be included in the coordinate system.")
     ps.add_argument("--logging", default="INFO", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                     help="Logging level to adopt [ DEBUG | INFO | WARNING | ERROR ]")
     ps.add_argument("--save-raw", dest='save_raw', default=None, type=str, help="When specified, save the "
-                    "raw path after bisections be before smoothing.")
+                                                                                "raw path after bisections be before smoothing.")
     args = ps.parse_args()
 
     # Setup logging based on designated logging level

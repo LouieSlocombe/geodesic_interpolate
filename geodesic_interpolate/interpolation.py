@@ -5,11 +5,10 @@ Will need another following geodesic smoothing to get final path.
 import logging
 
 import numpy as np
-from scipy.optimize import least_squares, minimize
+from scipy.optimize import least_squares
 
-from .geodesic import Geodesic
 from .coord_utils import get_bond_list, compute_wij, morse_scaler, align_geom, align_path
-
+from .geodesic import Geodesic
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +57,7 @@ def mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
         w = (w1 + w2) / 2
         d_min, x_min = np.inf, None
         friction = 0.1 / np.sqrt(geom1.shape[0])
+
         def target_func(X):
             """Squared difference with reference w0"""
             wx, dwdR = compute_wij(X, rijlist, scaler)
@@ -71,28 +71,31 @@ def mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
             x0 = (geom1 * coef + (1 - coef) * geom2).ravel()
             x0 += nudge * np.random.random_sample(x0.shape)
             logger.debug('Starting least-squares minimization of bisection point at %7.2f.', coef)
-            result = least_squares(lambda x: np.concatenate([compute_wij(x, rijlist, scaler)[0] - w, (x-x0)*friction]), x0,
-                                   lambda x: np.vstack([compute_wij(x, rijlist, scaler)[1], np.identity(x.size) * friction]), ftol=tol, gtol=tol)
+            result = least_squares(
+                lambda x: np.concatenate([compute_wij(x, rijlist, scaler)[0] - w, (x - x0) * friction]), x0,
+                lambda x: np.vstack([compute_wij(x, rijlist, scaler)[1], np.identity(x.size) * friction]), ftol=tol,
+                gtol=tol)
             x_mid = result['x'].reshape(-1, 3)
             # Take the interpolated geometry, construct new pair list and check for new contacts
             new_list = geom_list + [x_mid]
             new_rij, _ = get_bond_list(new_list, threshold=threshold, min_neighbors=0)
             extras = set(new_rij) - set(rijlist)
-            if extras: 
+            if extras:
                 logger.info('  Screened pairs came into contact. Adding reference point.')
                 # Update pair list then go back to the minimization loop if new contacts are found
                 geom_list = new_list
                 add_pair |= extras
                 break
             # Perform local geodesic optimization for the new image.
-            smoother = Geodesic(atoms, [geom1, x_mid, geom2], 0.7, threshold=threshold, log_level=logging.DEBUG, friction=1)
+            smoother = Geodesic(atoms, [geom1, x_mid, geom2], 0.7, threshold=threshold, log_level=logging.DEBUG,
+                                friction=1)
             smoother.compute_disps()
             width = max([np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2]])
             dist, x_mid = width + smoother.length, smoother.path[1]
             logger.debug('  Trial path length: %8.3f after %d iterations', dist, result['nfev'])
             if dist < d_min:
                 d_min, x_min = dist, x_mid
-        else:   # Both starting guesses finished without new atom pairs.  Minimization successful
+        else:  # Both starting guesses finished without new atom pairs.  Minimization successful
             break
     return x_min
 

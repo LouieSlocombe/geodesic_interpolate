@@ -9,13 +9,13 @@ from scipy.optimize import least_squares
 
 from .coord_utils import align_path, get_bond_list, morse_scaler, compute_wij
 
-
 logger = logging.getLogger(__name__)
 
 
 class Geodesic(object):
     """Optimizer to obtain geodesic in redundant internal coordinates.  Core part is the calculation
     of the path length in the internal metric."""
+
     def __init__(self, atoms, path, scaler=1.7, threshold=3, min_neighbors=4, log_level=logging.INFO,
                  friction=1e-3):
         """Initialize the interpolater
@@ -164,7 +164,7 @@ class Geodesic(object):
         """
         X0 = np.array(self.path[start:end]).ravel()
         if xref is None:
-            xref= X0
+            xref = X0
         self.disps = self.grad = self.segment = None
         logger.log(log_level, "  Degree of freedoms %6d: ", len(X0))
         if friction is None:
@@ -206,26 +206,26 @@ class Geodesic(object):
         logger.info("  Degree of freedoms %6d: ", (end - start) * 3 * self.natoms)
         # Microiteration convergence tolerances are adjusted on the fly based on level of convergence.
         curr_tol = tol * 10
-        self.compute_disps()    # Compute and print the initial path length
+        self.compute_disps()  # Compute and print the initial path length
         logger.info("  Initial length: %8.3f", self.length)
         for iteration in range(max_iter):
             max_dL = 0
             X0 = self.path.copy()
-            for i in images[:-1]:   # Use self.smooth() to optimize individual images
+            for i in images[:-1]:  # Use self.smooth() to optimize individual images
                 xmid = (self.path[i - 1] + self.path[i + 1]) * 0.5
                 self.smooth(curr_tol, max_iter=min(micro_iter, iteration + 6),
                             start=i, end=i + 1, log_level=logging.DEBUG,
                             friction=self.friction if iteration else 0.1,
                             xref=xmid)
                 max_dL = max(max_dL, self.optimality)
-            self.compute_disps()    # Compute final length after sweep
+            self.compute_disps()  # Compute final length after sweep
             logger.info("Sweep %3d: L=%7.2f dX=%7.2e tol=%7.3e dL=%7.3e",
-                     iteration, self.length, np.linalg.norm(self.path - X0), curr_tol, max_dL)
-            if max_dL < tol:    # Check for convergence.
+                        iteration, self.length, np.linalg.norm(self.path - X0), curr_tol, max_dL)
+            if max_dL < tol:  # Check for convergence.
                 logger.info("Optimization converged after %d iteartions", iteration)
                 break
-            curr_tol = max(tol * 0.5, max_dL * 0.2) # Adjust micro-iteration threshold
-            images = list(reversed(images))         # Alternate sweeping direction.
+            curr_tol = max(tol * 0.5, max_dL * 0.2)  # Adjust micro-iteration threshold
+            images = list(reversed(images))  # Alternate sweeping direction.
         else:
             logger.info("Optimization not converged after %d iteartions", iteration)
         rmsd, self.path = align_path(self.path)
