@@ -6,6 +6,9 @@ from scipy.spatial import KDTree
 
 import geodesic_interpolate as gi
 
+# set a random seed for reproducibility
+np.random.seed(42)
+
 
 def atoms_equal(atoms1, atoms2, tol=1e-2):
     if len(atoms1) != len(atoms2):
@@ -67,7 +70,7 @@ def test_case_ch():
         atoms_ref = read("data/H+CH4_CH3+H2_interpolated.xyz", index=':')
         # Check the end points are equal
         assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]], tol=1e-4)
-        # assert atoms_list_equal(atoms, atoms_ref)
+        assert atoms_list_equal(atoms, atoms_ref)
 
         os.remove("interpolated.xyz")
 
