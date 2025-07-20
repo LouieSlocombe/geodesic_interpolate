@@ -25,6 +25,8 @@ setup(
     python_requires='>=3.12',
     install_requires=[
         'numpy',
+        'scipy',
+        'ase',
     ],
     extras_require={
         'dev': [
