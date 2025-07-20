@@ -9,6 +9,10 @@ It has been shown that the method generate smooth paths with reasonable barrier 
 This is a pure python implementation, so it is not optimized for speed, but rather is intended to serve as a reference implementation of the algorithms described in the paper.  Still, interpolating systems with ~1000 atoms should not be a problem.
 
 
+See paper for more details: https://pubs.aip.org/aip/jcp/article/150/16/164103/198363
+
+Forked from https://github.com/virtualzx-nad/geodesic-interpolate
+
 Directory Structure
 ----
 - geodesic_interpolate      Python package for interpolation and smoothing by finding geodesic curves with redundant internal metrics

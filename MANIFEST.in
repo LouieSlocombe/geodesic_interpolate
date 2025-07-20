@@ -1,2 +1,2 @@
-recursive-include template_python/data *
+recursive-include geodesic_interpolate/data *
 include README.md
