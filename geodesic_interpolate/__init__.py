@@ -1,1 +1,1 @@
-from .geodesic_interpolate import interpolate
+from .geodesic import interpolate

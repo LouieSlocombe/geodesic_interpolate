@@ -1,14 +1,11 @@
 import os
 
 import numpy as np
+import pytest
 from ase.io import read
 from scipy.spatial import KDTree
 
 import geodesic_interpolate as gi
-import pytest
-
-# set a random seed for reproducibility
-np.random.seed(42)
 
 
 def atoms_equal(atoms1, atoms2, tol=1e-2):
