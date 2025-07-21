@@ -148,59 +148,36 @@ class Geodesic(object):
         logger.log(log_level, "Final path length: %12.5f  Max RMSD in path: %10.2f", self.length, rmsd)
         return self.path
 
-    def sweep(self,
-              tol=1e-3,
-              max_iter=50,
-              micro_iter=20,
-              start=1,
-              end=-1):
+    def sweep(self, tol=1e-3, max_iter=50, micro_iter=20, start=1, end=-1):
         if end < 0:
-            end += self.n_images
-        self.n_eval = 0
+            end = self.n_images + end
+        self.neval = 0
         images = range(start, end)
         logger.info("  Degree of freedoms %6d: ", (end - start) * 3 * self.n_atoms)
-
+        # Microiteration convergence tolerances are adjusted on the fly based on level of convergence.
         curr_tol = tol * 10
-        self.compute_displacements()
+        self.compute_displacements()  # Compute and print the initial path length
         logger.info("  Initial length: %8.3f", self.length)
-
         for iteration in range(max_iter):
             max_dL = 0
             X0 = self.path.copy()
-
-            for i in images[:-1]:
+            for i in images[:-1]:  # Use self.smooth() to optimize individual images
                 xmid = (self.path[i - 1] + self.path[i + 1]) * 0.5
-                self.smooth(
-                    curr_tol,
-                    max_iter=min(micro_iter, iteration + 6),
-                    start=i,
-                    end=i + 1,
-                    log_level=logging.DEBUG,
-                    friction=0.1 if iteration == 0 else self.friction,
-                    xref=xmid,
-                )
+                self.smooth(curr_tol, max_iter=min(micro_iter, iteration + 6),
+                            start=i, end=i + 1, log_level=logging.DEBUG,
+                            friction=self.friction if iteration else 0.1,
+                            xref=xmid)
                 max_dL = max(max_dL, self.optimality)
-
-            self.compute_displacements()
-            logger.info(
-                "Sweep %3d: L=%7.2f dX=%7.2e tol=%7.3e dL=%7.3e",
-                iteration,
-                self.length,
-                np.linalg.norm(self.path - X0),
-                curr_tol,
-                max_dL,
-            )
-
-            if max_dL < tol:
-                logger.info("Optimization converged after %d iterations", iteration)
+            self.compute_displacements()  # Compute final length after sweep
+            logger.info("Sweep %3d: L=%7.2f dX=%7.2e tol=%7.3e dL=%7.3e",
+                        iteration, self.length, np.linalg.norm(self.path - X0), curr_tol, max_dL)
+            if max_dL < tol:  # Check for convergence.
+                logger.info("Optimization converged after %d iteartions", iteration)
                 break
-
-            curr_tol = max(tol * 0.5, max_dL * 0.2)
-            images = reversed(images)
-
+            curr_tol = max(tol * 0.5, max_dL * 0.2)  # Adjust micro-iteration threshold
+            images = list(reversed(images))  # Alternate sweeping direction.
         else:
-            logger.info("Optimization not converged after %d iterations", iteration)
-
+            logger.info("Optimization not converged after %d iteartions", iteration)
         rmsd, self.path = align_path(self.path)
         logger.info("Final path length: %12.5f  Max RMSD in path: %10.2f", self.length, rmsd)
         return self.path
