@@ -88,7 +88,7 @@ def test_case_diels_alder():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_trp_cage_unfold():
     in_file = "data/TrpCage_unfold"
@@ -104,7 +104,7 @@ def test_case_trp_cage_unfold():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_collagen():
     in_file = "data/collagen"
@@ -120,7 +120,7 @@ def test_case_collagen():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_case_calcium_binding():
     in_file = "data/calcium_binding"
     out_file = "interpolated"
