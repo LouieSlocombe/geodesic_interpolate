@@ -6,12 +6,12 @@ from .geodesic import Geodesic
 
 logger = logging.getLogger(__name__)
 
-from .fileio import read_xyz, write_xyz
+from .fileio import from_ase_atoms, to_ase_atoms, read_xyz, write_xyz
 from .interpolation import redistribute
 
 
 def interpolate(
-        filename,
+        atoms,
         n_images=17,
         sweep=None,
         output="interpolated.xyz",
@@ -30,18 +30,21 @@ def interpolate(
     # Setup logging based on designated logging level
     logging.basicConfig(format="[%(module)-12s]%(message)s", level=logging_level)
 
-    # Read the initial geometries.
-    symbols, geometries = read_xyz(filename)
-    logger.info('Loaded %d geometries from %s', len(geometries), filename)
+    # Check if the input is an ASE Atoms object or a filename.
+    if isinstance(atoms, list):
+        # If it's an ASE Atoms object, convert it to symbols and geometry.
+        symbols, geometries = from_ase_atoms(atoms)
+    elif isinstance(atoms, str):
+        # If it's a filename, read the geometries from the file.
+        symbols, geometries = read_xyz(atoms)
+    else:
+        raise TypeError("Input must be an ASE Atoms object or a filename.")
+
     if len(geometries) < 2:
         raise ValueError("Need at least two initial geometries.")
 
-    # First redistribute number of images.  Perform interpolation if too few and subsampling if too many
-    # images are given
     raw = redistribute(symbols, geometries, n_images, tol=tol * 5)
 
-    # Perform smoothing by minimizing distance in Cartesian coordinates with redundant internal metric
-    # to find the appropriate geodesic curve on the hyperspace.
     smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction)
     if sweep is None:
         sweep = len(symbols) > 35
@@ -50,7 +53,11 @@ def interpolate(
             smoother.sweep(tol=tol, max_iter=max_iter, micro_iter=micro_iter)
         else:
             smoother.smooth(tol=tol, max_iter=max_iter)
-    finally:
-        # Save the smoothed path to output file.
-        logging.info('Saving final path to file %s', output)
+    except ValueError as e:
+        logger.error(f"Error during smoothing: {e}")
+
+    if isinstance(atoms, list):
+        return to_ase_atoms(symbols, smoother.path)
+    else:
         write_xyz(output, symbols, smoother.path)
+        return None

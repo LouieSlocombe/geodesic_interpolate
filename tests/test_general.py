@@ -75,6 +75,19 @@ def test_case_ch():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
+def test_case_ch_atoms():
+    print(flush=True)
+    in_file = "data/H+CH4_CH3+H2"
+    out_file = "interpolated"
+    atoms_in = read(f"{in_file}.xyz", index=':')
+
+    atoms = gi.interpolate(atoms_in)
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+
 def test_case_diels_alder():
     print(flush=True)
     in_file = "data/DielsAlder"
