@@ -10,46 +10,37 @@ logger = logging.getLogger(__name__)
 
 
 def _mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4.0):
-    # Process the initial geometries, construct coordinate system and obtain average internals
     geom1, geom2 = np.array(geom1), np.array(geom2)
     add_pair = set()
     geom_list = [geom1, geom2]
-    # This loop is for ensuring a sufficient large coordinate system.  The interpolated point may
-    # have atom pairs in contact that are far away at both end-points, which may cause collision.
-    # One can include all atom pairs, but this may blow up for large molecules.  Here the compromise
-    # is to use a screened list of atom pairs first, then add more if additional atoms come into
-    # contant, then rerun the minimization until the coordinate system is consistant with the
-    # interpolated geometry
+
     while True:
         rij_list, re = get_bond_list(geom_list, threshold=threshold + 1.0, enforce=add_pair)
         scaler = morse_scaler(alpha=0.7, re=re)
-        w1, _ = compute_wij(geom1, rij_list, scaler)
-        w2, _ = compute_wij(geom2, rij_list, scaler)
-        w = (w1 + w2) / 2
+        w = (compute_wij(geom1, rij_list, scaler)[0] + compute_wij(geom2, rij_list, scaler)[0]) / 2
         d_min, x_min = np.inf, None
         friction = 0.1 / np.sqrt(geom1.shape[0])
 
-        # The inner loop performs minimization using either end-point as the starting guess.
         for coef in [0.02, 0.98]:
-            x0 = (geom1 * coef + (1 - coef) * geom2).ravel()
-            x0 += nudge * np.random.random_sample(x0.shape)
-            logger.debug('Starting least-squares minimization of bisection point at %7.2f.', coef)
+            x0 = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * np.random.random_sample(geom1.size)
+            logger.debug("Starting least-squares minimization of bisection point at %7.2f.", coef)
             result = least_squares(
-                lambda x: np.concatenate([compute_wij(x, rij_list, scaler)[0] - w, (x - x0) * friction]), x0,
-                lambda x: np.vstack([compute_wij(x, rij_list, scaler)[1], np.identity(x.size) * friction]), ftol=tol,
-                gtol=tol)
-            x_mid = result['x'].reshape(-1, 3)
-            # Take the interpolated geometry, construct new pair list and check for new contacts
-            new_list = geom_list + [x_mid]
-            new_rij, _ = get_bond_list(new_list, threshold=threshold, min_neighbors=0)
+                lambda x: np.concatenate([compute_wij(x, rij_list, scaler)[0] - w, (x - x0) * friction]),
+                x0,
+                lambda x: np.vstack([compute_wij(x, rij_list, scaler)[1], np.identity(x.size) * friction]),
+                ftol=tol,
+                gtol=tol,
+            )
+            x_mid = result["x"].reshape(-1, 3)
+            new_rij, _ = get_bond_list(geom_list + [x_mid], threshold=threshold, min_neighbors=0)
             extras = set(new_rij) - set(rij_list)
+
             if extras:
-                logger.info('  Screened pairs came into contact. Adding reference point.')
-                # Update pair list then go back to the minimization loop if new contacts are found
-                geom_list = new_list
-                add_pair |= extras
+                logger.info("  Screened pairs came into contact. Adding reference point.")
+                geom_list.append(x_mid)
+                add_pair.update(extras)
                 break
-            # Perform local geodesic optimization for the new image.
+
             smoother = Geodesic(atoms,
                                 [geom1, x_mid, geom2],
                                 scaler=0.7,
@@ -57,13 +48,15 @@ def _mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4.0):
                                 log_level=logging.DEBUG,
                                 friction=1)
             smoother.compute_displacements()
-            width = max([np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2]])
-            dist, x_mid = width + smoother.length, smoother.path[1]
-            logger.debug('  Trial path length: %8.3f after %d iterations', dist, result['nfev'])
+            width = max(np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2])
+            dist = width + smoother.length
+
+            logger.debug("  Trial path length: %8.3f after %d iterations", dist, result["nfev"])
             if dist < d_min:
-                d_min, x_min = dist, x_mid
+                d_min, x_min = dist, smoother.path[1]
         else:
             break
+
     return x_min
 
 
@@ -74,7 +67,7 @@ def redistribute(atoms, geoms, n_images, tol=1e-2):
     # Add bisection points if there are too few images
     while len(geoms) < n_images:
         dists = [np.sqrt(np.mean((g1 - g2) ** 2)) for g1, g2 in zip(geoms[1:], geoms)]
-        max_i = np.argmax(dists)
+        max_i = int(np.argmax(dists))
         logger.info(
             "Inserting image between %d and %d with Cartesian RMSD %10.3f. New length: %d",
             max_i, max_i + 1, dists[max_i], len(geoms) + 1
@@ -87,7 +80,7 @@ def redistribute(atoms, geoms, n_images, tol=1e-2):
     # Remove points if there are too many images
     while len(geoms) > n_images:
         dists = [np.sqrt(np.mean((g1 - g2) ** 2)) for g1, g2 in zip(geoms[2:], geoms)]
-        min_i = np.argmin(dists)
+        min_i = int(np.argmin(dists))
         logger.info(
             "Removing image %d. Cartesian RMSD of merged section %10.3f",
             min_i + 1, dists[min_i]
