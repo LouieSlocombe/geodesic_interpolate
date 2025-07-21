@@ -34,7 +34,7 @@ def align_geom(ref_geom, geom):
 
 def get_bond_list(geom,
                   atoms=None,
-                  threshold=4,
+                  threshold=4.0,
                   min_neighbors=4,
                   snapshots=30,
                   bond_threshold=1.8,

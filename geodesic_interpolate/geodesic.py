@@ -14,7 +14,7 @@ class Geodesic(object):
                  atoms,
                  path,
                  scaler=1.7,
-                 threshold=3,
+                 threshold=3.0,
                  min_neighbors=4,
                  log_level=logging.INFO,
                  friction=1e-3):
