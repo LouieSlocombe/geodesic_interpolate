@@ -23,10 +23,8 @@ def read_xyz(filename):
 
 
 def write_xyz(filename, atoms, coords):
-    n_atoms = len(atoms)
     with open(filename, 'w') as f:
         for i, X in enumerate(np.atleast_3d(coords)):
-            f.write("%d\n" % n_atoms)
-            f.write("Frame %d\n" % i)
-            for a, Xa in zip(atoms, X):
-                f.write(" {:3} {:21.12f} {:21.12f} {:21.12f}\n".format(a, *Xa))
+            f.write(f"{len(atoms)}\n")
+            f.write(f"Frame {i}\n")
+            f.writelines(f" {a:3} {Xa[0]:21.12f} {Xa[1]:21.12f} {Xa[2]:21.12f}\n" for a, Xa in zip(atoms, X))
