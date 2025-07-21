@@ -65,7 +65,7 @@ def test_case_ch():
     in_file = "data/H+CH4_CH3+H2"
     out_file = "interpolated"
 
-    gi.interpolate(f"{in_file}.xyz")
+    gi.geodesic_interpolate(f"{in_file}.xyz")
     atoms = read(f"{out_file}.xyz", index=':')
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 
@@ -81,7 +81,7 @@ def test_case_ch_atoms():
     out_file = "interpolated"
     atoms_in = read(f"{in_file}.xyz", index=':')
 
-    atoms = gi.interpolate(atoms_in)
+    atoms = gi.geodesic_interpolate(atoms_in)
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 
     assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
@@ -93,7 +93,7 @@ def test_case_diels_alder():
     in_file = "data/DielsAlder"
     out_file = "interpolated"
 
-    gi.interpolate(f"{in_file}.xyz")
+    gi.geodesic_interpolate(f"{in_file}.xyz")
     atoms = read(f"{out_file}.xyz", index=':')
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 
@@ -110,7 +110,7 @@ def test_case_trp_cage_unfold():
     in_file = "data/TrpCage_unfold"
     out_file = "interpolated"
 
-    gi.interpolate(f"{in_file}.xyz")
+    gi.geodesic_interpolate(f"{in_file}.xyz")
     atoms = read(f"{out_file}.xyz", index=':')
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 
@@ -127,7 +127,7 @@ def test_case_collagen():
     in_file = "data/collagen"
     out_file = "interpolated"
 
-    gi.interpolate(f"{in_file}.xyz")
+    gi.geodesic_interpolate(f"{in_file}.xyz")
     atoms = read(f"{out_file}.xyz", index=':')
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 
@@ -143,7 +143,7 @@ def test_case_calcium_binding():
     in_file = "data/calcium_binding"
     out_file = "interpolated"
 
-    gi.interpolate(f"{in_file}.xyz")
+    gi.geodesic_interpolate(f"{in_file}.xyz")
     atoms = read(f"{out_file}.xyz", index=':')
     atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
 

@@ -10,7 +10,7 @@ from .fileio import from_ase_atoms, to_ase_atoms, read_xyz, write_xyz
 from .interpolation import redistribute
 
 
-def interpolate(
+def geodesic_interpolate(
         atoms,
         n_images=17,
         sweep=None,
