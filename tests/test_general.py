@@ -61,6 +61,7 @@ def atoms_list_bond_lengths_equal(list1, list2, cutoff=2.0, tol=1e-4):
 
 
 def test_case_ch():
+    print(flush=True)
     in_file = "data/H+CH4_CH3+H2"
     out_file = "interpolated"
 
@@ -75,6 +76,7 @@ def test_case_ch():
 
 
 def test_case_diels_alder():
+    print(flush=True)
     in_file = "data/DielsAlder"
     out_file = "interpolated"
 
@@ -91,6 +93,7 @@ def test_case_diels_alder():
 # @pytest.mark.slow
 @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_trp_cage_unfold():
+    print(flush=True)
     in_file = "data/TrpCage_unfold"
     out_file = "interpolated"
 
@@ -107,6 +110,7 @@ def test_case_trp_cage_unfold():
 # @pytest.mark.slow
 @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_collagen():
+    print(flush=True)
     in_file = "data/collagen"
     out_file = "interpolated"
 
@@ -122,6 +126,7 @@ def test_case_collagen():
 
 # @pytest.mark.slow
 def test_case_calcium_binding():
+    print(flush=True)
     in_file = "data/calcium_binding"
     out_file = "interpolated"
 
@@ -133,3 +138,36 @@ def test_case_calcium_binding():
 
     assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
     assert atoms_list_equal(atoms, atoms_ref)
+
+
+def test_xyz_interconversion():
+    print(flush=True)
+    in_file = "data/H+CH4_CH3+H2"
+    atom_names, coords = gi.read_xyz(f"{in_file}.xyz")
+    print(atom_names)
+    print(coords)
+    gi.write_xyz('test.xyz', atom_names, coords)
+
+
+def test_atoms_interconversion():
+    print(flush=True)
+    in_file = "data/H+CH4_CH3+H2"
+    atoms = read(f"{in_file}.xyz", index=':')
+    print(atoms)
+    for atom in atoms:
+        print(atom.get_chemical_symbols())
+        print(atom.get_positions())
+    atom_names, coords = gi.from_ase_atoms(atoms)
+    print(atom_names)
+    print(coords)
+
+    atom_names, coords = gi.read_xyz(f"{in_file}.xyz")
+    print(atom_names)
+    print(coords)
+
+    atoms = gi.to_ase_atoms(atom_names, coords)
+
+    print(atoms)
+    for atom in atoms:
+        print(atom.get_chemical_symbols())
+        print(atom.get_positions())

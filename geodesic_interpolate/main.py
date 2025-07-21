@@ -22,7 +22,6 @@ def interpolate(
         friction=1e-2,
         dist_cutoff=3.0,
         logging_level="INFO",
-        save_raw=None,
         seed=42,
 ):
     # set a random seed for reproducibility
@@ -40,8 +39,6 @@ def interpolate(
     # First redistribute number of images.  Perform interpolation if too few and subsampling if too many
     # images are given
     raw = redistribute(symbols, geometries, n_images, tol=tol * 5)
-    if save_raw is not None:
-        write_xyz(save_raw, symbols, raw)
 
     # Perform smoothing by minimizing distance in Cartesian coordinates with redundant internal metric
     # to find the appropriate geodesic curve on the hyperspace.

@@ -1,6 +1,23 @@
 import numpy as np
 
 
+def from_ase_atoms(atoms):
+    atom_names = atoms[0].get_chemical_symbols()
+    coords = []
+    for atom in atoms:
+        coords.append(np.array(atom.get_positions()))
+    return atom_names, coords
+
+
+def to_ase_atoms(atoms, coords):
+    from ase import Atoms
+    if isinstance(coords, list):
+        coords = np.array(coords)
+    if coords.ndim == 2:
+        coords = coords[np.newaxis, ...]  # Add a new axis for single frame
+    return [Atoms(symbols=atoms, positions=frame) for frame in coords]
+
+
 def read_xyz(filename):
     coords = []
     with open(filename, 'r') as f:
