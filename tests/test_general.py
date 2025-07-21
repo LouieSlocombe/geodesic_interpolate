@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import pytest
 from ase.io import read
 from scipy.spatial import KDTree
 
@@ -103,8 +102,7 @@ def test_case_diels_alder():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-# @pytest.mark.slow
-@pytest.mark.skip  # Fails, Non-equal coordinates at index 1
+# @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_trp_cage_unfold():
     print(flush=True)
     in_file = "data/TrpCage_unfold"
@@ -120,8 +118,7 @@ def test_case_trp_cage_unfold():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-# @pytest.mark.slow
-@pytest.mark.skip  # Fails, Non-equal coordinates at index 1
+# @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
 def test_case_collagen():
     print(flush=True)
     in_file = "data/collagen"
@@ -137,7 +134,6 @@ def test_case_collagen():
     assert atoms_list_equal(atoms, atoms_ref)
 
 
-# @pytest.mark.slow
 def test_case_calcium_binding():
     print(flush=True)
     in_file = "data/calcium_binding"

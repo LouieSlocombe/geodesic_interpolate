@@ -13,7 +13,6 @@ from .interpolation import redistribute
 def geodesic_interpolate(
         atoms,
         n_images=17,
-        sweep=None,
         output="interpolated.xyz",
         tol=2e-3,
         max_iter=15,
@@ -24,18 +23,11 @@ def geodesic_interpolate(
         logging_level="INFO",
         seed=42,
 ):
-    # set a random seed for reproducibility
     np.random.seed(seed)
-
-    # Setup logging based on designated logging level
     logging.basicConfig(format="[%(module)-12s]%(message)s", level=logging_level)
-
-    # Check if the input is an ASE Atoms object or a filename.
     if isinstance(atoms, list):
-        # If it's an ASE Atoms object, convert it to symbols and geometry.
         symbols, geometries = from_ase_atoms(atoms)
     elif isinstance(atoms, str):
-        # If it's a filename, read the geometries from the file.
         symbols, geometries = read_xyz(atoms)
     else:
         raise TypeError("Input must be an ASE Atoms object or a filename.")
@@ -44,17 +36,15 @@ def geodesic_interpolate(
         raise ValueError("Need at least two initial geometries.")
 
     raw = redistribute(symbols, geometries, n_images, tol=tol * 5)
-
     smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction)
-    if sweep is None:
-        sweep = len(symbols) > 35
-    try:
-        if sweep:
-            smoother.sweep(tol=tol, max_iter=max_iter, micro_iter=micro_iter)
-        else:
-            smoother.smooth(tol=tol, max_iter=max_iter)
-    except ValueError as e:
-        logger.error(f"Error during smoothing: {e}")
+
+    # If the number of symbols is greater than 35, use sweep smoothing
+    sweep = len(symbols) > 35
+
+    if sweep:
+        smoother.sweep(tol=tol, max_iter=max_iter, micro_iter=micro_iter)
+    else:
+        smoother.smooth(tol=tol, max_iter=max_iter)
 
     if isinstance(atoms, list):
         return to_ase_atoms(symbols, smoother.path)
