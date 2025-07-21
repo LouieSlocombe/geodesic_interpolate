@@ -7,12 +7,14 @@ from scipy.spatial import KDTree
 logger = logging.getLogger(__name__)
 
 
+
 def align_path(path):
     path = np.array(path)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0
     for g, next_g in zip(path, path[1:]):
-        rmsd, next_g[:] = align_geom(g, next_g)
+        rmsd, aligned_geom = align_geom(g, next_g)
+        next_g[:] = aligned_geom
         max_rmsd = max(max_rmsd, rmsd)
     return max_rmsd, path
 

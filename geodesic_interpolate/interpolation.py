@@ -9,7 +9,7 @@ from .geodesic import Geodesic
 logger = logging.getLogger(__name__)
 
 
-def mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
+def _mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
     # Process the initial geometries, construct coordinate system and obtain average internals
     geom1, geom2 = np.array(geom1), np.array(geom2)
     add_pair = set()
@@ -80,7 +80,7 @@ def redistribute(atoms, geoms, nimages, tol=1e-2):
         max_i = np.argmax(dists)
         logger.info("Inserting image between %d and %d with Cartesian RMSD %10.3f.  New length:%d",
                     max_i, max_i + 1, dists[max_i], len(geoms) + 1)
-        insertion = mid_point(atoms, geoms[max_i], geoms[max_i + 1], tol)
+        insertion = _mid_point(atoms, geoms[max_i], geoms[max_i + 1], tol)
         _, insertion = align_geom(geoms[max_i], insertion)
         geoms.insert(max_i + 1, insertion)
         geoms = list(align_path(geoms)[1])
