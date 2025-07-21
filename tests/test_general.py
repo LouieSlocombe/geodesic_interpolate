@@ -5,6 +5,7 @@ from ase.io import read
 from scipy.spatial import KDTree
 
 import geodesic_interpolate as gi
+import pytest
 
 # set a random seed for reproducibility
 np.random.seed(42)
@@ -39,7 +40,7 @@ def atoms_list_equal(list1, list2, tol=1e-1):
     return True
 
 
-def atoms_list_bond_lengths_equal(list1, list2, cutoff=2.0, tol=1e-3):
+def atoms_list_bond_lengths_equal(list1, list2, cutoff=2.0, tol=1e-4):
     """Check if two lists of ASE Atoms objects have the same bond lengths."""
     if len(list1) != len(list2):
         print("Non-equal list lengths:", len(list1), len(list2))
@@ -63,33 +64,66 @@ def atoms_list_bond_lengths_equal(list1, list2, cutoff=2.0, tol=1e-3):
 
 
 def test_case_ch():
-    for i in range(1, 50):
-        gi.interpolate("data/H+CH4_CH3+H2.xyz")
-        atoms = read("interpolated.xyz", index=':')
-        # view(atoms)
-        atoms_ref = read("data/H+CH4_CH3+H2_interpolated.xyz", index=':')
-        # Check the end points are equal
-        assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]], tol=1e-4)
-        assert atoms_list_equal(atoms, atoms_ref)
+    in_file = "data/H+CH4_CH3+H2"
+    out_file = "interpolated"
 
-        os.remove("interpolated.xyz")
+    gi.interpolate(f"{in_file}.xyz")
+    atoms = read(f"{out_file}.xyz", index=':')
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+    os.remove(f"{out_file}.xyz")
 
 
 def test_case_diels_alder():
-    # DielsAlder.xyz
-    pass
+    in_file = "data/DielsAlder"
+    out_file = "interpolated"
+
+    gi.interpolate(f"{in_file}.xyz")
+    atoms = read(f"{out_file}.xyz", index=':')
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+    os.remove(f"{out_file}.xyz")
 
 
+@pytest.mark.slow
 def test_case_trp_cage_unfold():
-    # TrpCage_unfold.xyz
-    pass
+    in_file = "data/TrpCage_unfold"
+    out_file = "interpolated"
+
+    gi.interpolate(f"{in_file}.xyz")
+    atoms = read(f"{out_file}.xyz", index=':')
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+    os.remove(f"{out_file}.xyz")
 
 
 def test_case_collagen():
-    # collagen.xyz
-    pass
+    in_file = "data/collagen"
+    out_file = "interpolated"
+
+    gi.interpolate(f"{in_file}.xyz")
+    atoms = read(f"{out_file}.xyz", index=':')
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+    os.remove(f"{out_file}.xyz")
 
 
 def test_case_calcium_binding():
-    # calcium_binding.xyz
-    pass
+    in_file = "data/calcium_binding"
+    out_file = "interpolated"
+
+    gi.interpolate(f"{in_file}.xyz")
+    atoms = read(f"{out_file}.xyz", index=':')
+    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
+    assert atoms_list_equal(atoms, atoms_ref)
+
+    os.remove(f"{out_file}.xyz")
