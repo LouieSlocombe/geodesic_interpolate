@@ -60,7 +60,7 @@ def _mid_point(atoms, geom1, geom2, tol=1e-2, nudge=0.01, threshold=4):
             # Perform local geodesic optimization for the new image.
             smoother = Geodesic(atoms, [geom1, x_mid, geom2], 0.7, threshold=threshold, log_level=logging.DEBUG,
                                 friction=1)
-            smoother.compute_disps()
+            smoother.compute_displacements()
             width = max([np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2]])
             dist, x_mid = width + smoother.length, smoother.path[1]
             logger.debug('  Trial path length: %8.3f after %d iterations', dist, result['nfev'])
