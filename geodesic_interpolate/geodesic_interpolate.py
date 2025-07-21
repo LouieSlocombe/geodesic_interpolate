@@ -1,5 +1,7 @@
 import logging
 
+import numpy as np
+
 from .fileio import read_xyz, write_xyz
 from .geodesic import Geodesic
 from .interpolation import redistribute
@@ -17,10 +19,14 @@ def interpolate(
         micro_iter=20,
         scaling=1.7,
         friction=1e-2,
-        dist_cutoff=3,
+        dist_cutoff=3.0,
         logging_level="INFO",
-        save_raw=None
+        save_raw=None,
+        seed=42,
 ):
+    # set a random seed for reproducibility
+    np.random.seed(seed)
+
     # Setup logging based on designated logging level
     logging.basicConfig(format="[%(module)-12s]%(message)s", level=logging_level)
 
