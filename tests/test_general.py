@@ -1,7 +1,14 @@
 import os
 
 import numpy as np
+from ase import Atoms
+from ase.build import molecule
+from ase.calculators.emt import EMT
 from ase.io import read
+from ase.lattice.cubic import FaceCenteredCubic
+from ase.mep import NEB
+from ase.optimize.fire import FIRE as QuasiNewton
+from ase.visualize import view
 from scipy.spatial import KDTree
 
 import geodesic_interpolate as gi
@@ -180,3 +187,119 @@ def test_atoms_interconversion():
     for atom in atoms:
         print(atom.get_chemical_symbols())
         print(atom.get_positions())
+
+
+def test_ase_compare():
+    # Set the number of images you want.
+    nimages = 15
+
+    # Some algebra to determine surface normal and the plane of the surface.
+    d3 = [2, 1, 1]
+    a1 = np.array([0, 1, 1])
+    d1 = np.cross(a1, d3)
+    a2 = np.array([0, -1, 1])
+    d2 = np.cross(a2, d3)
+
+    # Create the slab.
+    slab = FaceCenteredCubic(
+        directions=[d1, d2, d3], size=(2, 1, 2), symbol='Pt', latticeconstant=3.9
+    )
+
+    # Add some vacuum to the slab.
+    uc = slab.get_cell()
+    uc[2] += [0.0, 0.0, 10.0]  # There are ten layers of vacuum.
+    uc = slab.set_cell(uc, scale_atoms=False)
+
+    # Some positions needed to place the atom in the correct place.
+    x1 = 1.379
+    x2 = 4.137
+    x3 = 2.759
+    y1 = 0.0
+    y2 = 2.238
+    z1 = 7.165
+    z2 = 6.439
+
+    # Add the adatom to the list of atoms and set constraints of surface atoms.
+    slab += Atoms('N', [((x2 + x1) / 2, y1, z1 + 1.5)])
+    # mask = [atom.symbol == 'Pt' for atom in slab]
+    # slab.set_constraint(FixAtoms(mask=mask))
+
+    # Optimise the initial state: atom below step.
+    initial = slab.copy()
+    initial.calc = EMT()
+    relax = QuasiNewton(initial)
+    relax.run(fmax=0.05)
+
+    # Optimise the final state: atom above step.
+    slab[-1].position = (x3, y2 + 1.0, z2 + 3.5)
+    final = slab.copy()
+    final.calc = EMT()
+    relax = QuasiNewton(final)
+    relax.run(fmax=0.05)
+
+    # Create a list of images for interpolation.
+    images = [initial]
+    for i in range(nimages - 2):
+        images.append(initial.copy())
+
+    for image in images:
+        image.calc = EMT()
+
+    images.append(final)
+
+    images = gi.geodesic_interpolate([images[0], images[-1]], n_images=nimages)  # 155
+    for image in images:
+        image.calc = EMT()
+    #
+    # view(images)
+
+    # Carry out idpp interpolation.
+    neb = NEB(images)
+    # neb.interpolate('idpp')  # 176
+    # neb.idpp_interpolate() #54
+    # neb.interpolate() # 23 173
+
+    # Run NEB calculation.
+    qn = QuasiNewton(neb)
+    qn.run(fmax=0.05)
+
+
+def test_ase_ethane():
+    nimages = 15
+
+    # Optimise molecule.
+    initial = molecule('C2H6')
+    initial.calc = EMT()
+    relax = QuasiNewton(initial)
+    relax.run(fmax=0.05)
+
+    # Create final state.
+    final = initial.copy()
+    final.positions[2:5] = initial.positions[[3, 4, 2]]
+
+    # Generate blank images.
+    images = [initial]
+
+    for i in range(nimages - 2):
+        images.append(initial.copy())
+
+    for image in images:
+        image.calc = EMT()
+
+    images.append(final)
+
+    images = gi.geodesic_interpolate([images[0], images[-1]], n_images=nimages)  # 1
+    for image in images:
+        image.calc = EMT()
+
+    # Run linear interpolation.
+    neb = NEB(images)  # 66
+    # neb.interpolate() # 46
+    # neb.idpp_interpolate() # 7
+    # neb.interpolate('idpp') # 7
+
+    # Run NEB calculation.
+    qn = QuasiNewton(neb)
+    qn.run(fmax=0.05)
+
+    view(neb.images)
