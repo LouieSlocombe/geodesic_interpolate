@@ -1,4 +1,6 @@
 import logging
+from typing import Callable
+from typing import List, Tuple, Optional
 
 import numpy as np
 from ase.data import atomic_numbers, covalent_radii
@@ -7,7 +9,7 @@ from scipy.spatial import KDTree
 logger = logging.getLogger(__name__)
 
 
-def align_path(path):
+def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
     path = np.array(path)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0.0
@@ -18,7 +20,7 @@ def align_path(path):
     return max_rmsd, path
 
 
-def align_geom(ref_geom, geom):
+def align_geom(ref_geom: np.ndarray, geom: np.ndarray) -> tuple[float, np.ndarray]:
     center = np.mean(ref_geom, axis=0)
     ref_geom_centered = ref_geom - center
     geom_centered = geom - np.mean(geom, axis=0)
@@ -36,13 +38,13 @@ def align_geom(ref_geom, geom):
     return rmsd, aligned_geom
 
 
-def get_bond_list(geom,
-                  atoms=None,
-                  threshold=4.0,
-                  min_neighbors=4,
-                  snapshots=30,
-                  bond_threshold=1.8,
-                  enforce=()):
+def get_bond_list(geom: np.ndarray,
+                  atoms: Optional[List[str]] = None,
+                  threshold: float = 4.0,
+                  min_neighbors: int = 4,
+                  snapshots: int = 30,
+                  bond_threshold: float = 1.8,
+                  enforce: Tuple[Tuple[int, int], ...] = ()) -> Tuple[List[Tuple[int, int]], np.ndarray]:
     geom = np.asarray(geom)
     if len(geom.shape) < 3:
         geom = geom.reshape(1, -1, 3)
@@ -74,6 +76,7 @@ def get_bond_list(geom,
     for i, j in rij_list:
         count[i] += 1
         count[j] += 1
+    # Using the last defined tree from the loop for corrections
     for idx, ct in enumerate(count):
         if ct < min_neighbors:
             _, neighbors = tree.query(geom[-1, idx], k=min_neighbors + 1)
@@ -91,7 +94,6 @@ def get_bond_list(geom,
     if atoms is None:
         re = np.full(len(rij_list), 2.0)
     else:
-        # Use covalent_radii from ase.data
         atom_numbers = [atomic_numbers[atom.capitalize()] for atom in atoms]
         radius = np.array([covalent_radii[num] for num in atom_numbers])
         re = np.array([radius[i] + radius[j] for i, j in rij_list])
@@ -99,7 +101,8 @@ def get_bond_list(geom,
     return rij_list, re
 
 
-def compute_rij(geom, rij_list):
+def compute_rij(geom: np.ndarray,
+                rij_list: list[tuple[int, int]]) -> tuple[np.ndarray, np.ndarray]:
     n_rij = len(rij_list)
     rij = np.zeros(n_rij)
     b_mat = np.zeros((n_rij, len(geom), 3))
@@ -115,7 +118,9 @@ def compute_rij(geom, rij_list):
     return rij, b_mat
 
 
-def compute_wij(geom, rij_list, func):
+def compute_wij(geom: np.ndarray,
+                rij_list: List[Tuple[int, int]],
+                func: Callable[[np.ndarray], Tuple[np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray]:
     geom = np.asarray(geom).reshape(-1, 3)
     rij, b_mat = compute_rij(geom, rij_list)
     wij, d_wdr = func(rij)
@@ -123,8 +128,9 @@ def compute_wij(geom, rij_list, func):
     return wij, b_mat.reshape(len(rij_list), -1)
 
 
-def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
-    def scaler(x):
+def morse_scaler(re: float = 1.5, alpha: float = 1.7, beta: float = 0.01) -> Callable[
+    [np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+    def scaler(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         ratio = x / re
         val1 = np.exp(alpha * (1.0 - ratio))
         val2 = beta / ratio
@@ -134,8 +140,9 @@ def morse_scaler(re=1.5, alpha=1.7, beta=0.01):
     return scaler
 
 
-def elu_scaler(re=2.0, alpha=2.0, beta=0.01):
-    def scaler(x):
+def elu_scaler(re: float = 2.0, alpha: float = 2.0, beta: float = 0.01) -> Callable[
+    [np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+    def scaler(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         val1 = np.where(x > re, np.exp(alpha * (1.0 - x / re)), (1.0 - x / re) * alpha + 1.0)
         d_val = np.where(x > re, -alpha / re * np.exp(alpha * (1.0 - x / re)), -alpha / re)
         val2 = beta * re / x
