@@ -16,6 +16,12 @@ This had been modified from the original code to work with ASE.
 
 Test Examples
 ----
+These live in `tests/data`, next to the reference paths the suite compares against.  The
+tests resolve their data paths relative to the working directory, so run them from inside
+the `tests` directory:
+
+    cd tests && pytest
+
 - `H+CH4_CH3+H2.xyz` A simple test case.  Should always work.
 - `DielsAlder.xyz`   Dehydro-Diels-Alder reaction.  This is an important test case because the initial structure is planar symmetric and
  could access both the final structure and its mirror image, which as exactly the same internal coordinates.  Proper
@@ -38,41 +44,66 @@ Test Examples
 
 Installation
 ----
-The package can be used without installation from the package directory with
+Install the latest version straight from GitHub with
 
     pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
 
-This will install a Python package `geodesic_interpolate`.
+This installs a Python package named `geodesic_interpolate`.  Alternatively, clone the
+repository and install it in editable mode, together with the test dependencies, with
+
+    pip install -e ".[dev]"
+
+Requires Python 3.12 or newer.  `numpy`, `scipy` and `ase` are pulled in automatically.
 
 
 Usage
 ----
-usage: geodesic_interpolate [-h] [--nimages NIMAGES] [--sweep] [--no-sweep]
-                            [--output OUTPUT] [--tol TOL] [--maxiter MAXITER]
-                            [--microiter MICROITER] [--scaling SCALING]
-                            [--friction FRICTION] [--dist-cutoff DIST_CUTOFF]
-                            [--logging {DEBUG,INFO,WARNING,ERROR}]
-                            [--save-raw SAVE_RAW]
-                            filename
+This fork exposes a Python API rather than a command line tool.  A single function,
+`geodesic_interpolate`, does the whole job: it builds a raw path with the requested
+number of images, then smooths it into a geodesic.
 
-Interpolates between two geometries
+Input and output mirror each other.  Pass a filename and the path is written to an XYZ
+file; pass ASE `Atoms` objects and the path comes back as `Atoms` objects.
 
-positional arguments:
-  * filename            XYZ file containing geometries. If the number of images is smaller than the desired number,
-   interpolation points will be added. If the number is greater, subsampling will be performed.
+```python
+import geodesic_interpolate as gi
+from ase.io import read
 
-optional arguments:
-  * `--n_images NIMAGES` Number of images. (default: 17)
-  * `--sweep`           Sweep across the path optimizing one image at a time, instead of moving all images at the same time.
-   Default is to perform sweeping updates if there are more than 30 atoms. (default: None)
-  * `--no-sweep`        Do not perform sweeping. (default: None)
-  * `--output OUTPUT`   Output filename. Default is interp.xyz (default: interpolated.xyz)
-  * `--tol TOL`         Convergence tolerance (default: 0.002)
-  * `--maxiter MAXITER` Maximum number of minimization iterations (default: 15)
-  * `--microiter MICROITER`  Maximum number of micro iterations for sweeping algorithm. (default: 20)
-  * `--scaling SCALING` Exponential parameter for morse potential (default: 1.7)
-  * `--friction FRICTION`   Size of friction term used to prevent very large change of geometry. (default: 0.01)
-  * `--dist-cutoff DIST_CUTOFF` Cut-off value for the distance between a pair of atoms to be included in the coordinate system. (default: 3)
-  * `--logging {DEBUG,INFO,WARNING,ERROR}`   Logging level to adopt [ DEBUG | INFO | WARNING | ERROR ] (default: INFO)
-  * `--save-raw SAVE_RAW`   When specified, save the raw path after bisections be before smoothing. (default: None)
+# From an XYZ file. Writes the interpolated path to `output` and returns None.
+gi.geodesic_interpolate("H+CH4_CH3+H2.xyz", n_images=17, output="interpolated.xyz")
+
+# From ASE Atoms objects. Returns a list of Atoms, one per image.
+end_points = read("H+CH4_CH3+H2.xyz", index=":")
+images = gi.geodesic_interpolate(end_points, n_images=17)
+```
+
+Only the first and last geometries need be meaningful; any intermediate ones are used
+if present.  If the input has fewer geometries than `n_images`, interpolation points are
+added by bisection, and if it has more, images are removed one at a time.
+
+Arguments:
+  * `atoms` A list of ASE `Atoms` objects, or the name of an XYZ file holding the end points.
+  * `n_images` Number of images in the interpolated path. (default: 17)
+  * `output` Output filename. Only used when `atoms` is a filename. (default: interpolated.xyz)
+  * `tol` Convergence tolerance for the smoothing. (default: 0.002)
+  * `max_iter` Maximum number of minimization iterations, or sweeps when sweeping. (default: 15)
+  * `micro_iter` Maximum number of micro iterations per image, used only when sweeping. (default: 20)
+  * `scaling` Exponential parameter for the morse potential setting the coordinate metric. (default: 1.7)
+  * `friction` Size of the friction term used to prevent very large changes of geometry. (default: 0.01)
+  * `dist_cutoff` Cut-off distance for a pair of atoms to be included in the coordinate system. (default: 3.0)
+  * `logging_level` Logging level to adopt [ DEBUG | INFO | WARNING | ERROR ]. (default: INFO)
+  * `seed` Seed for the random number generator. (default: 42)
+
+Sweeping — optimizing one image at a time instead of moving them all together — is
+chosen automatically for systems of more than 35 atoms, where the whole-path optimizer
+becomes slow.  It is not selectable by hand.
+
+The bisection step adds random nudges to its starting geometries, so results are only
+reproducible because `seed` is fixed.  Changing it, for a large system especially, will
+give a different path; running a few seeds and keeping the shortest is worthwhile.
+
+Helpers for moving between XYZ files and ASE objects are re-exported at the top level:
+`read_xyz`, `write_xyz`, `from_ase_atoms` and `to_ase_atoms`.
+
+Citations for the method and for ASE are collected in `citations.bib`.
 

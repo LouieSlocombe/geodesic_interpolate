@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,10 +8,21 @@ version = "0.0.1"
 description = "Interpolation and smoothing of reaction paths with geodesics in redundant internal coordinates."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 
 authors = [
   { name = "Louie Slocombe", email = "louies@hotmail.co.uk" },
+]
+
+keywords = [
+  "chemistry",
+  "computational chemistry",
+  "reaction path",
+  "interpolation",
+  "geodesic",
+  "nudged elastic band",
+  "ase",
 ]
 
 dependencies = [
@@ -21,9 +32,14 @@ dependencies = [
 ]
 
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
 ]
 
 [project.optional-dependencies]
@@ -36,12 +52,6 @@ dev = [
 Homepage = "https://github.com/LouieSlocombe/geodesic_interpolate"
 Repository = "https://github.com/LouieSlocombe/geodesic_interpolate"
 
-[tool.setuptools]
-include-package-data = true
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["geodesic_interpolate", "geodesic_interpolate.*"]
-
-[tool.setuptools.package-data]
-"geodesic_interpolate" = ["data/*"]
