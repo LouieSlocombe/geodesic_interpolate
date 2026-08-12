@@ -8,11 +8,12 @@ Cartesian derivatives (the Wilson B matrix), and the scaling functions that defi
 the metric.
 """
 import logging
-from typing import Callable
-from typing import List, Tuple, Optional
+from typing import Any, Callable
+from typing import List, Tuple, Optional, Union
 
 import numpy as np
 from ase.data import atomic_numbers, covalent_radii
+from scipy.sparse import coo_matrix, csr_matrix, identity, triu
 from scipy.spatial import KDTree
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
         max_rmsd: Largest RMSD between any two adjacent images after alignment.
         path: The aligned path.  This is a copy, so the input is left untouched.
     """
-    path = np.array(path)
+    path = np.array(path, dtype=float)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0.0
     for g, next_g in zip(path, path[1:]):
@@ -77,13 +78,42 @@ def align_geom(ref_geom: np.ndarray, geom: np.ndarray) -> tuple[float, np.ndarra
     return rmsd, aligned_geom
 
 
+def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float) -> List[Tuple[int, int]]:
+    """List the atom pairs separated by three or fewer bonds in one geometry.
+
+    Every such pair is a bonded pair with an optional extra bond tacked on at either
+    end, so the answer is the sparsity pattern of ``(A + I) A (A + I)`` for the bond
+    adjacency ``A``.  Phrasing it as two sparse matrix products keeps the cost down on
+    large molecules, where walking the neighbour lists in Python does not scale.
+
+    Args:
+        tree: KD-tree of the geometry to work from.
+        n_atoms: Number of atoms in the geometry.
+        bond_threshold: Distance below which two atoms count as bonded.
+
+    Returns:
+        The ``(i, j)`` pairs, with ``i < j``.
+    """
+    bonded = tree.query_pairs(bond_threshold, output_type='ndarray')
+    if len(bonded) == 0:
+        return []
+    # The adjacency matrix needs both directions of every bond
+    rows = np.concatenate([bonded[:, 0], bonded[:, 1]])
+    cols = np.concatenate([bonded[:, 1], bonded[:, 0]])
+    adjacency = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_atoms, n_atoms)).tocsr()
+    with_self = adjacency + identity(n_atoms, format='csr')
+    reach = triu(with_self @ adjacency @ with_self, k=1).tocoo()
+    return list(zip(reach.row.tolist(), reach.col.tolist()))
+
+
 def get_bond_list(geom: np.ndarray,
                   atoms: Optional[List[str]] = None,
                   threshold: float = 4.0,
                   min_neighbors: int = 4,
                   snapshots: int = 30,
                   bond_threshold: float = 1.8,
-                  enforce: Tuple[Tuple[int, int], ...] = ()) -> Tuple[List[Tuple[int, int]], np.ndarray]:
+                  enforce: Tuple[Tuple[int, int], ...] = (),
+                  rng: Optional[Any] = None) -> Tuple[List[Tuple[int, int]], np.ndarray]:
     """Get the list of atom pairs that define the internal coordinate system.
 
     Samples images from the path and collects every pair of atoms that comes within
@@ -104,60 +134,58 @@ def get_bond_list(geom: np.ndarray,
         bond_threshold: Distance below which two atoms count as bonded, used to work
             out which pairs are within three bonds of each other.
         enforce: Pairs to include regardless of how far apart the atoms are.
+        rng: Random source for choosing which images to sample.  Defaults to the global
+            `numpy.random` state.  Pass a `numpy.random.RandomState` to keep the choice
+            reproducible without disturbing the caller's global state.
 
     Returns:
-        rij_list: Sorted list of the ``(i, j)`` atom pairs making up the coordinates.
+        rij_list: List of the ``(i, j)`` atom pairs making up the coordinates.
         re: Equilibrium distance for each pair, taken as the sum of the two covalent
             radii.
     """
     # Type casting and value checks on the input parameters
-    geom = np.asarray(geom)
+    geom = np.asarray(geom, dtype=float)
     if len(geom.shape) < 3:
         # A single geometry, or a flattened one, is promoted to 3d
         geom = geom.reshape(1, -1, 3)
-    min_neighbors = min(min_neighbors, geom.shape[1] - 1)
+    n_atoms = geom.shape[1]
+    min_neighbors = min(min_neighbors, n_atoms - 1)
+    if rng is None:
+        rng = np.random
 
     # Always look at both end points, plus a random selection of the images between
     # them, so that a long path costs no more to analyse than a short one
     snapshots = min(len(geom), snapshots)
     images = [0, len(geom) - 1]
     if snapshots > 2:
-        images.extend(np.random.choice(range(1, snapshots - 1), snapshots - 2, replace=False))
+        images.extend(rng.choice(range(1, len(geom) - 1), snapshots - 2, replace=False))
     # Build the neighbour list for each sampled image and merge them together
     rij_set = set(enforce)
     for image in images:
         tree = KDTree(geom[image])
-        pairs = tree.query_pairs(threshold)
-        rij_set.update(pairs)
-        # Anything within three bonds of each other is included whatever the
-        # distance: take each bonded pair and join up their neighbours
-        bonded = tree.query_pairs(bond_threshold)
-        neighbors = {i: {i} for i in range(geom.shape[1])}
-        for i, j in bonded:
-            neighbors[i].add(j)
-            neighbors[j].add(i)
-        for i, j in bonded:
-            for ni in neighbors[i]:
-                for nj in neighbors[j]:
-                    if ni != nj:
-                        pair = tuple(sorted([ni, nj]))
-                        if pair not in rij_set:
-                            rij_set.add(pair)
+        rij_set.update(map(tuple, tree.query_pairs(threshold, output_type='ndarray').tolist()))
+        # Anything within three bonds of each other is included whatever the distance
+        rij_set.update(_pairs_within_three_bonds(tree, n_atoms, bond_threshold))
     rij_list = sorted(rij_set)
     # Count how many pairs each atom appears in, so `min_neighbors` can be checked
-    count = np.zeros(geom.shape[1], dtype=int)
-    for i, j in rij_list:
-        count[i] += 1
-        count[j] += 1
-    # Top up any under-connected atom with its nearest neighbours.  This reuses the
-    # KD-tree left over from the sampling loop, which is the last image visited.
-    for idx, ct in enumerate(count):
-        if ct < min_neighbors:
-            _, neighbors = tree.query(geom[-1, idx], k=min_neighbors + 1)
-            for i in neighbors:
+    pairs = np.asarray(rij_list, dtype=int).reshape(-1, 2)
+    count = np.bincount(pairs.ravel(), minlength=n_atoms)
+    # Top up any under-connected atom with its nearest neighbours in the final geometry.
+    # Atoms only ever gain neighbours here, so querying the whole under-connected set in
+    # one go is safe; the count is still re-checked in turn, because an atom may have
+    # been brought up to `min_neighbors` by an earlier atom's additions.
+    under_connected = np.flatnonzero(count < min_neighbors)
+    if len(under_connected):
+        tree = KDTree(geom[-1])
+        _, neighbors = tree.query(geom[-1, under_connected], k=min_neighbors + 1)
+        neighbors = np.asarray(neighbors).reshape(len(under_connected), -1)
+        for idx, nearest in zip(under_connected.tolist(), neighbors.tolist()):
+            if count[idx] >= min_neighbors:
+                continue
+            for i in nearest:
                 if i == idx:
                     continue
-                pair = tuple(sorted([i, idx]))
+                pair = (i, idx) if i < idx else (idx, i)
                 if pair in rij_set:
                     continue
                 else:
@@ -165,14 +193,59 @@ def get_bond_list(geom: np.ndarray,
                     rij_list.append(pair)
                     count[i] += 1
                     count[idx] += 1
+        pairs = np.asarray(rij_list, dtype=int).reshape(-1, 2)
     if atoms is None:
         re = np.full(len(rij_list), 2.0)
     else:
         atom_numbers = [atomic_numbers[atom.capitalize()] for atom in atoms]
         radius = np.array([covalent_radii[num] for num in atom_numbers])
-        re = np.array([radius[i] + radius[j] for i, j in rij_list])
+        re = radius[pairs[:, 0]] + radius[pairs[:, 1]]
     logger.debug("Pair list contain %d pairs", len(rij_list))
     return rij_list, re
+
+
+# Index bookkeeping derived from a pair list.  Building it costs about as much as one
+# evaluation, and the same pair list is used for every image over the whole run, so the
+# last few are kept around.  A strong reference to the list is held alongside its `id`,
+# which is what makes the identity check sound: the list cannot be collected and have
+# its address handed to something else while the entry lives.
+_PAIR_INDEX_CACHE: dict = {}
+_PAIR_INDEX_CACHE_SIZE = 8
+
+
+def _pair_index(rij_list: List[Tuple[int, int]], n_atoms: int) -> Tuple[np.ndarray, ...]:
+    """Build, or look up, the index arrays describing a pair list.
+
+    Args:
+        rij_list: Indices of the atom pairs.
+        n_atoms: Number of atoms, which sets the width of the B matrix.
+
+    Returns:
+        pairs: The pair list as an ``(n_pairs, 2)`` integer array.
+        indptr, indices: CSR skeleton of the B matrix.  Every distance depends on six
+            Cartesian components, three for each of its atoms.
+        sign: ``+1`` where the pair is stored low index first, ``-1`` otherwise, so the
+            gradients can be written in the column order CSR requires.
+    """
+    key = (id(rij_list), len(rij_list), n_atoms)
+    cached = _PAIR_INDEX_CACHE.get(key)
+    if cached is not None and cached[0] is rij_list:
+        return cached[1:]
+
+    pairs = np.asarray(rij_list, dtype=int).reshape(-1, 2)
+    lo = np.minimum(pairs[:, 0], pairs[:, 1])
+    hi = np.maximum(pairs[:, 0], pairs[:, 1])
+    indices = np.empty((len(pairs), 6), dtype=np.int32)
+    indices[:, 0:3] = 3 * lo[:, None] + np.arange(3)
+    indices[:, 3:6] = 3 * hi[:, None] + np.arange(3)
+    indptr = np.arange(0, 6 * len(pairs) + 1, 6, dtype=np.int32)
+    sign = np.where(pairs[:, 0] < pairs[:, 1], 1.0, -1.0)
+
+    if len(_PAIR_INDEX_CACHE) >= _PAIR_INDEX_CACHE_SIZE:
+        _PAIR_INDEX_CACHE.clear()
+    entry = (rij_list, pairs, indptr, indices.ravel(), sign)
+    _PAIR_INDEX_CACHE[key] = entry
+    return entry[1:]
 
 
 def compute_rij(geom: np.ndarray,
@@ -188,26 +261,23 @@ def compute_rij(geom: np.ndarray,
         b_mat: Wilson B matrix, of shape ``(n_pairs, n_atoms, 3)``, holding the
             Cartesian gradient of every distance.
     """
-    n_rij = len(rij_list)
-    rij = np.zeros(n_rij)
-    b_mat = np.zeros((n_rij, len(geom), 3))
-
-    for idx, (i, j) in enumerate(rij_list):
-        d_vec = geom[i] - geom[j]
-        r = np.linalg.norm(d_vec)
-        rij[idx] = r
-        # A distance only depends on its own two atoms, and moving one of them is
-        # the exact opposite of moving the other
-        grad = d_vec / r
-        b_mat[idx, i] = grad
-        b_mat[idx, j] = -grad
-
+    pairs = _pair_index(rij_list, len(geom))[0]
+    d_vec = geom[pairs[:, 0]] - geom[pairs[:, 1]]
+    rij = np.linalg.norm(d_vec, axis=1)
+    # A distance only depends on its own two atoms, and moving one of them is
+    # the exact opposite of moving the other
+    grad = d_vec / rij[:, None]
+    b_mat = np.zeros((len(pairs), len(geom), 3))
+    rows = np.arange(len(pairs))
+    b_mat[rows, pairs[:, 0]] = grad
+    b_mat[rows, pairs[:, 1]] = -grad
     return rij, b_mat
 
 
 def compute_wij(geom: np.ndarray,
                 rij_list: List[Tuple[int, int]],
-                func: Callable[[np.ndarray], Tuple[np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray]:
+                func: Callable[[np.ndarray], Tuple[np.ndarray, np.ndarray]],
+                sparse: bool = False) -> Tuple[np.ndarray, Union[np.ndarray, csr_matrix]]:
     """Calculate a list of scaled distances and their Cartesian derivatives.
 
     Same as `compute_rij`, except each distance is passed through a scaling function
@@ -219,18 +289,35 @@ def compute_wij(geom: np.ndarray,
         rij_list: Indices of the atom pairs to evaluate.
         func: Scaling function returning both the scaled value and its derivative
             with respect to the raw distance.  Must broadcast over arrays.
+        sparse: Return the B matrix as a sparse matrix rather than a dense array.  Only
+            six of its entries per row are ever non-zero, so this is what the optimizers
+            are given: it saves building the dense array, and lets scipy solve the
+            least-squares steps iteratively instead of by dense factorisation.
 
     Returns:
         wij: The scaled distance for each pair.
         b_mat: Cartesian gradients of the scaled distances, with the atom and
             component axes flattened together so scipy.optimize can use it directly.
     """
-    geom = np.asarray(geom).reshape(-1, 3)
-    rij, b_mat = compute_rij(geom, rij_list)
+    geom = np.asarray(geom, dtype=float).reshape(-1, 3)
+    if not sparse:
+        rij, b_mat = compute_rij(geom, rij_list)
+        wij, d_wdr = func(rij)
+        # Chain rule: scale each pair's gradient by dw/dr for that pair
+        b_mat *= d_wdr[:, None, None]
+        return wij, b_mat.reshape(len(rij_list), -1)
+
+    pairs, indptr, indices, sign = _pair_index(rij_list, len(geom))
+    d_vec = geom[pairs[:, 0]] - geom[pairs[:, 1]]
+    rij = np.linalg.norm(d_vec, axis=1)
     wij, d_wdr = func(rij)
-    # Chain rule: scale each pair's gradient by dw/dr for that pair
-    b_mat *= d_wdr[:, None, None]
-    return wij, b_mat.reshape(len(rij_list), -1)
+    # Normalise, then apply the chain rule, in that order so the result matches the
+    # dense branch bit for bit.  `sign` puts the gradient of the lower-numbered atom
+    # first, which is the column order CSR wants.
+    grad = (d_vec / rij[:, None]) * (d_wdr * sign)[:, None]
+    data = np.concatenate([grad, -grad], axis=1).ravel()
+    b_mat = csr_matrix((data, indices, indptr), shape=(len(pairs), geom.size))
+    return wij, b_mat
 
 
 def morse_scaler(re: float = 1.5, alpha: float = 1.7, beta: float = 0.01) -> Callable[
@@ -280,8 +367,11 @@ def elu_scaler(re: float = 2.0, alpha: float = 2.0, beta: float = 0.01) -> Calla
     """
 
     def scaler(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        val1 = np.where(x > re, np.exp(alpha * (1.0 - x / re)), (1.0 - x / re) * alpha + 1.0)
-        d_val = np.where(x > re, -alpha / re * np.exp(alpha * (1.0 - x / re)), -alpha / re)
+        tail = alpha * (1.0 - x / re)
+        decay = np.exp(tail)
+        outer = x > re
+        val1 = np.where(outer, decay, tail + 1.0)
+        d_val = np.where(outer, -alpha / re * decay, -alpha / re)
         val2 = beta * re / x
         return val1 + val2, d_val - val2 / x
 

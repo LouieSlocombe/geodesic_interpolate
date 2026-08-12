@@ -9,6 +9,7 @@ import logging
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse import bmat, identity
 
 from .coord_utils import align_path, get_bond_list, morse_scaler, compute_wij
 
@@ -30,7 +31,8 @@ class Geodesic(object):
                  threshold=3.0,
                  min_neighbors=4,
                  log_level=logging.INFO,
-                 friction=1e-3):
+                 friction=1e-3,
+                 rng=None):
         """Initialise the interpolater.
 
         Args:
@@ -48,19 +50,23 @@ class Geodesic(object):
             log_level: Logging level to report progress at.
             friction: Weight of the friction term in the target function, which keeps
                 the optimizer from taking steps large enough to blow the path up.
+            rng: Random source used when sampling images to build the coordinates.
+                Defaults to the global `numpy.random` state.
 
         Raises:
             ValueError: If the path is not three dimensional.
         """
+        path = np.asarray(path, dtype=float)
+        if path.ndim != 3:
+            raise ValueError('The path to be interpolated must have 3 dimensions')
         rmsd0, self.path = align_path(path)
         logger.log(log_level, "Maximum RMSD change in initial path: %10.2f", rmsd0)
-        if self.path.ndim != 3:
-            raise ValueError('The path to be interpolated must have 3 dimensions')
         self.n_images, self.n_atoms, _ = self.path.shape
         # Construct coordinates
-        self.rij_list, self.re = get_bond_list(path, atoms, threshold=threshold, min_neighbors=min_neighbors)
-        if isinstance(scaler, float):
-            self.scaler = morse_scaler(re=self.re, alpha=1.7)
+        self.rij_list, self.re = get_bond_list(self.path, atoms, threshold=threshold,
+                                               min_neighbors=min_neighbors, rng=rng)
+        if isinstance(scaler, (int, float, np.number)):
+            self.scaler = morse_scaler(re=self.re, alpha=scaler)
         else:
             self.scaler = scaler
         self.n_rij = len(self.rij_list)
@@ -70,13 +76,11 @@ class Geodesic(object):
         logger.log(log_level, "Performing geodesic smoothing")
         logger.log(log_level, "  Images: %4d  Atoms %4d Rijs %6d", self.n_images, self.n_atoms, len(self.rij_list))
         self.n_eval = 0
-        self.w = [None] * len(path)
-        self.dw_dR = [None] * len(path)
-        self.X_mid = [None] * (len(path) - 1)
-        self.w_mid = [None] * (len(path) - 1)
-        self.dwdR_mid = [None] * (len(path) - 1)
+        self.w = [None] * self.n_images
+        self.dw_dR = [None] * self.n_images
+        self.w_mid = [None] * (self.n_images - 1)
+        self.dwdR_mid = [None] * (self.n_images - 1)
         self.displacements = self.grad = self.segment = None
-        self.conv_path = []
 
     def update_intc(self):
         """Fill in any internal coordinates and derivatives currently marked unknown.
@@ -85,22 +89,25 @@ class Geodesic(object):
         them, works out the midpoint geometries where needed, and evaluates the
         coordinates and their gradients.  Everything already known is left alone, so
         nothing is evaluated twice.
+
+        The derivatives are kept sparse, since each scaled distance only depends on the
+        six Cartesian components of its own two atoms.
         """
         for i, X in enumerate(self.path):
             if self.w[i] is None:
-                self.w[i], self.dw_dR[i] = compute_wij(X, self.rij_list, self.scaler)
+                self.w[i], self.dw_dR[i] = compute_wij(X, self.rij_list, self.scaler, sparse=True)
         for i, (X0, X1) in enumerate(zip(self.path, self.path[1:])):
             if self.w_mid[i] is None:
                 Xm = (X0 + X1) / 2
-                self.X_mid[i] = Xm
-                self.w_mid[i], self.dwdR_mid[i] = compute_wij(Xm, self.rij_list, self.scaler)
+                self.w_mid[i], self.dwdR_mid[i] = compute_wij(Xm, self.rij_list, self.scaler, sparse=True)
 
     def update_geometry(self, X, start, end):
         """Move a segment of the path, invalidating everything that depended on it.
 
         The internal coordinates, derivatives and midpoints of the affected images are
         reset to unknown so that `update_intc` recomputes them.  Note that moving
-        images ``start:end`` also invalidates the midpoint just before ``start``.
+        images ``start:end`` also invalidates the midpoint just before ``start``, if
+        there is one.
 
         Args:
             X: New Cartesian coordinates for the segment, flattened or otherwise.
@@ -115,7 +122,10 @@ class Geodesic(object):
             return False
         self.path[start:end] = X
         self.w[start:end] = [None] * (end - start)
-        self.w_mid[start - 1:end] = [None] * (end - start + 1)
+        # Clamped, because a negative slice bound would wrap round to the end of the
+        # list and insert entries instead of overwriting them
+        first_mid = max(start - 1, 0)
+        self.w_mid[first_mid:end] = [None] * (min(end, self.n_images - 1) - first_mid)
         return True
 
     def compute_displacements(self, start=1, end=-1, dx=None, friction=1e-3):
@@ -127,16 +137,23 @@ class Geodesic(object):
 
         Args:
             start, end: Section of the path to measure.  A negative ``end`` counts back
-                from the last image.
+                from the last image.  ``start`` must be at least 1: the end points of
+                the path are fixed, and each segment is measured against the image
+                before it.
             dx: Displacement of the segment from its reference geometry.  When given,
                 it enters the target function scaled by ``friction``.
             friction: Weight of the friction term.
 
-        Sets `self.length`, `self.displacements` and `self.disps0` (the displacements
-        without the friction residuals).
+        Sets `self.length` and `self.displacements`.
+
+        Raises:
+            ValueError: If the section does not lie between the two fixed end points.
         """
         if end < 0:
             end += self.n_images
+        if not 1 <= start < end <= self.n_images - 1:
+            raise ValueError(f'Section ({start}, {end}) must lie between the fixed end '
+                             f'points of a {self.n_images} image path')
         self.update_intc()
         # Calculate displacement vectors in each segment, and the total length
         vecs_l = [wm - wl for wl, wm in zip(self.w[start - 1:end], self.w_mid[start - 1:end])]
@@ -147,7 +164,6 @@ class Geodesic(object):
         else:
             trans = friction * dx  # Translation from initial geometry.  friction term
         self.displacements = np.concatenate(vecs_l + vecs_r + [trans])
-        self.disps0 = self.displacements[:len(vecs_l) * 2]
 
     def compute_disp_grad(self, start, end, friction=1e-3):
         """Compute derivatives of the displacement vectors with respect to Cartesians.
@@ -157,28 +173,37 @@ class Geodesic(object):
         where the factors of a half come from.  The friction residuals contribute a
         diagonal block at the bottom of the matrix.
 
+        An image only appears in the two half-segments it touches, so the matrix is
+        block-bidiagonal, and each block is itself sparse because a distance only
+        depends on its own two atoms.  It is assembled sparse and left that way: for a
+        few dozen atoms fewer than one entry in a hundred is non-zero, and handing a
+        dense array to `scipy.optimize.least_squares` makes it factorise the whole
+        thing on every iteration.
+
         Args:
             start, end: Section of the path being differentiated.
             friction: Weight of the friction term, matching `compute_displacements`.
 
-        Sets `self.grad` and `self.grad0` (the block excluding friction).
+        Sets `self.grad`.
         """
         # Calculate derivatives of displacement vectors with respect to image Cartesians
         l = end - start + 1
-        self.grad = np.zeros((l * 2 * self.n_rij + 3 * (end - start) * self.n_atoms, (end - start) * 3 * self.n_atoms))
-        self.grad0 = self.grad[:l * 2 * self.n_rij]
-        grad_shape = (l, self.n_rij, end - start, 3 * self.n_atoms)
-        grad_l = self.grad[:l * self.n_rij].reshape(grad_shape)
-        grad_r = self.grad[l * self.n_rij:l * self.n_rij * 2].reshape(grad_shape)
+        n_seg = end - start
+        n_dof = 3 * self.n_atoms
+        blocks_l = [[None] * n_seg for _ in range(l)]
+        blocks_r = [[None] * n_seg for _ in range(l)]
         for i, image in enumerate(range(start, end)):
             dmid1 = self.dwdR_mid[image - 1] / 2
             dmid2 = self.dwdR_mid[image] / 2
-            grad_l[i + 1, :, i, :] = dmid2 - self.dw_dR[image]
-            grad_l[i, :, i, :] = dmid1
-            grad_r[i + 1, :, i, :] = -dmid2
-            grad_r[i, :, i, :] = self.dw_dR[image] - dmid1
-        for idx in range((end - start) * 3 * self.n_atoms):
-            self.grad[l * self.n_rij * 2 + idx, idx] = friction
+            blocks_l[i + 1][i] = dmid2 - self.dw_dR[image]
+            blocks_l[i][i] = dmid1
+            blocks_r[i + 1][i] = -dmid2
+            blocks_r[i][i] = self.dw_dR[image] - dmid1
+        # The friction residuals are one scaled identity, laid out block by block so it
+        # lines up with the image columns above it
+        friction_block = identity(n_dof, format='csr') * friction
+        blocks_f = [[friction_block if k == i else None for i in range(n_seg)] for k in range(n_seg)]
+        self.grad = bmat(blocks_l + blocks_r + blocks_f, format='csr')
 
     def compute_target_func(self, X=None, start=1, end=-1, log_level=logging.INFO, x0=None, friction=1e-3):
         """Compute the vectorised target function used for least-squares minimisation.
@@ -204,9 +229,8 @@ class Geodesic(object):
         dx = np.zeros(self.path[start:end].size) if x0 is None else self.path[start:end].ravel() - x0.ravel()
         self.compute_displacements(start, end, dx=dx, friction=friction)
         self.compute_disp_grad(start, end, friction=friction)
-        self.optimality = np.linalg.norm(np.einsum('i,i...', self.displacements, self.grad), ord=np.inf)
+        self.optimality = np.abs(self.grad.T @ self.displacements).max()
         logger.log(log_level, "Iteration %3d: Length %10.3f |dL|=%7.3e", self.n_eval, self.length, self.optimality)
-        self.conv_path.append(self.path[1].copy())
         self.n_eval += 1
 
     def target_func(self, X, **kwargs):
@@ -299,8 +323,9 @@ class Geodesic(object):
         """
         if end < 0:
             end = self.n_images + end
-        self.neval = 0
-        images = range(start, end)
+        self.n_eval = 0
+        iteration = -1
+        images = list(range(start, end))
         logger.info("  Degree of freedoms %6d: ", (end - start) * 3 * self.n_atoms)
         # Microiteration convergence tolerances are adjusted on the fly based on level of convergence.
         curr_tol = tol * 10
@@ -309,7 +334,7 @@ class Geodesic(object):
         for iteration in range(max_iter):
             max_dL = 0
             X0 = self.path.copy()
-            for i in images[:-1]:  # Use self.smooth() to optimize individual images
+            for i in images:  # Use self.smooth() to optimize individual images
                 # Each image is pulled back towards the midpoint of its neighbours,
                 # with heavy friction on the first sweep to keep the initial guess
                 # from being thrown around
@@ -323,12 +348,12 @@ class Geodesic(object):
             logger.info("Sweep %3d: L=%7.2f dX=%7.2e tol=%7.3e dL=%7.3e",
                         iteration, self.length, np.linalg.norm(self.path - X0), curr_tol, max_dL)
             if max_dL < tol:  # Check for convergence.
-                logger.info("Optimization converged after %d iteartions", iteration)
+                logger.info("Optimization converged after %d iterations", iteration)
                 break
             curr_tol = max(tol * 0.5, max_dL * 0.2)  # Adjust micro-iteration threshold
-            images = list(reversed(images))  # Alternate sweeping direction.
+            images.reverse()  # Alternate sweeping direction.
         else:
-            logger.info("Optimization not converged after %d iteartions", iteration)
+            logger.info("Optimization not converged after %d iterations", iteration + 1)
         rmsd, self.path = align_path(self.path)
         logger.info("Final path length: %12.5f  Max RMSD in path: %10.2f", self.length, rmsd)
         return self.path
