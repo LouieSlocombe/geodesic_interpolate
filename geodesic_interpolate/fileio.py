@@ -1,9 +1,12 @@
 """File IO utilities, and conversion to and from ASE Atoms objects."""
+import os
 from typing import List, Tuple
 from typing import Union
 
 import numpy as np
 from ase import Atoms
+
+Filename = Union[str, os.PathLike]
 
 
 def from_ase_atoms(atoms: List[Atoms]) -> Tuple[List[str], List[np.ndarray]]:
@@ -42,11 +45,12 @@ def to_ase_atoms(atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) 
     return [Atoms(symbols=atoms, positions=frame) for frame in coords]
 
 
-def read_xyz(filename: str) -> Tuple[List[str], List[np.ndarray]]:
+def read_xyz(filename: Filename) -> Tuple[List[str], List[np.ndarray]]:
     """Read an XYZ file and return the atom names and coordinates.
 
     Args:
-        filename: Name of the XYZ data file.  It may hold any number of frames.
+        filename: Name of the XYZ data file.  It may hold any number of frames, and
+            blank lines between them are ignored.
 
     Returns:
         atom_names: Element symbols of all the atoms, read from the last frame.
@@ -58,6 +62,8 @@ def read_xyz(filename: str) -> Tuple[List[str], List[np.ndarray]]:
     coords: List[np.ndarray] = []
     with open(filename, 'r') as f:
         for line in f:
+            if not line.strip():  # Blank line between or after frames
+                continue
             try:
                 n_atoms = int(line)  # Read number of atoms
                 next(f)  # Skip over comments
@@ -67,7 +73,7 @@ def read_xyz(filename: str) -> Tuple[List[str], List[np.ndarray]]:
                     line = next(f).split()
                     atom_names.append(line[0])
                     geom[i] = line[1:4]  # Numpy auto-converts str to float
-            except (TypeError, IOError, IndexError, StopIteration):
+            except (TypeError, ValueError, IOError, IndexError, StopIteration):
                 raise ValueError('Incorrect XYZ file format')
             coords.append(geom)
     if not coords:
@@ -75,16 +81,19 @@ def read_xyz(filename: str) -> Tuple[List[str], List[np.ndarray]]:
     return atom_names, coords
 
 
-def write_xyz(filename: str, atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) -> None:
+def write_xyz(filename: Filename, atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) -> None:
     """Write atom names and coordinate data to an XYZ file.
 
     Args:
         filename: Name of the XYZ data file to write.
         atoms: Iterable of atom names.
-        coords: Coordinates, of shape ``(n_images, n_atoms, 3)``.
+        coords: Coordinates, of shape ``(n_images, n_atoms, 3)``.  A single frame of
+            shape ``(n_atoms, 3)`` is accepted too.
     """
+    # Not `np.atleast_3d`, which would turn a single frame into `(n_atoms, 3, 1)`
+    coords = np.asarray(coords, dtype=float).reshape(-1, len(atoms), 3)
     with open(filename, 'w') as f:
-        for i, X in enumerate(np.atleast_3d(coords)):
+        for i, X in enumerate(coords):
             f.write(f"{len(atoms)}\n")
             f.write(f"Frame {i}\n")
             f.writelines(

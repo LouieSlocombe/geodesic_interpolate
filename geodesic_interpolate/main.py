@@ -1,14 +1,33 @@
 """Top-level driver tying the interpolation and smoothing stages together."""
 import logging
+import os
 
 import numpy as np
 
+from .fileio import from_ase_atoms, to_ase_atoms, read_xyz, write_xyz
 from .geodesic import Geodesic
+from .interpolation import redistribute
 
 logger = logging.getLogger(__name__)
 
-from .fileio import from_ase_atoms, to_ase_atoms, read_xyz, write_xyz
-from .interpolation import redistribute
+
+def _configure_logging(logging_level) -> None:
+    """Set the reporting level for this package without touching anyone else's logging.
+
+    `logging.basicConfig` would reconfigure the root logger of whatever application
+    imported this package, so the level is set on the package logger instead.  A handler
+    is attached only when nothing else has set one up, which keeps the progress output
+    visible when running from a bare script.
+
+    Args:
+        logging_level: Level to report progress at, as a name or a number.
+    """
+    package_logger = logging.getLogger(__package__)
+    package_logger.setLevel(logging_level)
+    if not package_logger.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[%(module)-12s]%(message)s"))
+        package_logger.addHandler(handler)
 
 
 def geodesic_interpolate(
@@ -48,7 +67,8 @@ def geodesic_interpolate(
         logging_level: Logging level for the progress output.
         seed: Seed for the random nudges and image sampling, so runs reproduce.  The
             bisection is stochastic, and without a fixed seed larger systems will not
-            give the same path twice.
+            give the same path twice.  The seed is kept to a private random stream, so
+            the caller's own use of `numpy.random` is left alone.
 
     Returns:
         The interpolated path as a list of ASE Atoms objects when `atoms` was a list of
@@ -58,12 +78,12 @@ def geodesic_interpolate(
         TypeError: If `atoms` is neither a list of ASE Atoms nor a filename.
         ValueError: If fewer than two geometries are supplied.
     """
-    np.random.seed(seed)
-    logging.basicConfig(format="[%(module)-12s]%(message)s", level=logging_level)
-    if isinstance(atoms, list):
-        symbols, geometries = from_ase_atoms(atoms)
-    elif isinstance(atoms, str):
+    rng = np.random.RandomState(seed)
+    _configure_logging(logging_level)
+    if isinstance(atoms, (str, os.PathLike)):
         symbols, geometries = read_xyz(atoms)
+    elif isinstance(atoms, list):
+        symbols, geometries = from_ase_atoms(atoms)
     else:
         raise TypeError("Input must be an ASE Atoms object or a filename.")
 
@@ -72,8 +92,8 @@ def geodesic_interpolate(
 
     # A looser tolerance is enough for the raw path, which only has to be a decent
     # starting guess for the smoothing that follows
-    raw = redistribute(symbols, geometries, n_images, tol=tol * 5)
-    smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction)
+    raw = redistribute(symbols, geometries, n_images, tol=tol * 5, rng=rng)
+    smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction, rng=rng)
 
     # Optimizing the whole path at once is faster, but scipy's optimizers slow down
     # badly as the system grows, so past this size sweep one image at a time instead
@@ -84,8 +104,8 @@ def geodesic_interpolate(
     else:
         smoother.smooth(tol=tol, max_iter=max_iter)
 
-    if isinstance(atoms, list):
-        return to_ase_atoms(symbols, smoother.path)
-    else:
+    if isinstance(atoms, (str, os.PathLike)):
         write_xyz(output, symbols, smoother.path)
         return None
+    else:
+        return to_ase_atoms(symbols, smoother.path)

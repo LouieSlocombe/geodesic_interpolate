@@ -5,10 +5,11 @@ count matches what was asked for.  The result is only a starting guess: a follow
 round of geodesic smoothing is needed to get the final path.
 """
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse import identity, vstack
 
 from .coord_utils import align_geom, align_path
 from .coord_utils import get_bond_list, compute_wij, morse_scaler
@@ -22,7 +23,8 @@ def _mid_point(atoms: Any,
                geom2: np.ndarray,
                tol: float = 1e-2,
                nudge: float = 0.01,
-               threshold: float = 4.0) -> np.ndarray:
+               threshold: float = 4.0,
+               rng: Optional[Any] = None) -> np.ndarray:
     """Find the geometry whose internal coordinates sit closest to the average of two others.
 
     A least-squares minimisation against the average of the two end points, run twice,
@@ -44,11 +46,15 @@ def _mid_point(atoms: Any,
         nudge: Size of the random nudge added to the starting geometry.  Helps to turn
             up different solutions, and to break symmetry when the optimal path does.
         threshold: Distance cut-off for including an atom pair in the coordinates.
+        rng: Random source for the nudge and the image sampling.  Defaults to the global
+            `numpy.random` state.
 
     Returns:
         The optimised mid-point, bisecting the two end points in internal coordinates.
     """
-    geom1, geom2 = np.array(geom1), np.array(geom2)
+    geom1, geom2 = np.array(geom1, dtype=float), np.array(geom2, dtype=float)
+    if rng is None:
+        rng = np.random
     add_pair: set = set()
     geom_list: list[np.ndarray] = [geom1, geom2]
 
@@ -59,29 +65,41 @@ def _mid_point(atoms: Any,
     # that comes into contact, and redo the minimisation until the coordinate system and
     # the interpolated geometry agree.
     while True:
-        rij_list, re = get_bond_list(geom_list, threshold=threshold + 1.0, enforce=add_pair)
+        rij_list, re = get_bond_list(geom_list, threshold=threshold + 1.0, enforce=add_pair, rng=rng)
         scaler = morse_scaler(alpha=0.7, re=re)
-        w = (compute_wij(geom1, rij_list, scaler)[0] + compute_wij(geom2, rij_list, scaler)[0]) / 2
+        w = (compute_wij(geom1, rij_list, scaler, sparse=True)[0]
+             + compute_wij(geom2, rij_list, scaler, sparse=True)[0]) / 2
         d_min: float = np.inf
         x_min: np.ndarray | None = None
         friction: float = 0.1 / np.sqrt(geom1.shape[0])
+        # The friction residuals never change, so build them once rather than per call
+        friction_block = identity(geom1.size, format='csr') * friction
+        # scipy asks for the residuals and the Jacobian in separate calls but at the same
+        # geometry, so holding on to the last evaluation halves the work
+        last_eval: list = [None, None]
+
+        def wij_at(x: np.ndarray):
+            if last_eval[0] is None or not np.array_equal(last_eval[0], x):
+                last_eval[0] = np.array(x)
+                last_eval[1] = compute_wij(x, rij_list, scaler, sparse=True)
+            return last_eval[1]
 
         # The inner loop minimises from either end point in turn as the starting guess
         for coef in [0.02, 0.98]:
-            x0: np.ndarray = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * np.random.random_sample(geom1.size)
+            x0: np.ndarray = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * rng.random_sample(geom1.size)
             logger.debug("Starting least-squares minimization of bisection point at %7.2f.", coef)
             # Residuals are the difference from the target internals, plus a friction
             # term holding the geometry near where it started
             result = least_squares(
-                lambda x: np.concatenate([compute_wij(x, rij_list, scaler)[0] - w, (x - x0) * friction]),
+                lambda x: np.concatenate([wij_at(x)[0] - w, (x - x0) * friction]),
                 x0,
-                lambda x: np.vstack([compute_wij(x, rij_list, scaler)[1], np.identity(x.size) * friction]),
+                lambda x: vstack([wij_at(x)[1], friction_block], format='csr'),
                 ftol=tol,
                 gtol=tol,
             )
             x_mid: np.ndarray = result["x"].reshape(-1, 3)
             # Rebuild the pair list including the new point and check for fresh contacts
-            new_rij, _ = get_bond_list(geom_list + [x_mid], threshold=threshold, min_neighbors=0)
+            new_rij, _ = get_bond_list(geom_list + [x_mid], threshold=threshold, min_neighbors=0, rng=rng)
             extras = set(new_rij) - set(rij_list)
 
             if extras:
@@ -97,7 +115,8 @@ def _mid_point(atoms: Any,
                                 scaler=0.7,
                                 threshold=threshold,
                                 log_level=logging.DEBUG,
-                                friction=1)
+                                friction=1,
+                                rng=rng)
             smoother.compute_displacements()
             width = max(np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2])
             dist = width + smoother.length
@@ -113,7 +132,8 @@ def _mid_point(atoms: Any,
     return x_min
 
 
-def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float = 1e-2) -> List[np.ndarray]:
+def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float = 1e-2,
+                 rng: Optional[Any] = None) -> List[np.ndarray]:
     """Add or remove images so the path has the requested number of them.
 
     If there are too few, new points are added by bisecting the largest RMSD gap.  If
@@ -125,6 +145,8 @@ def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float 
         geoms: Geometries of the original path.
         n_images: The desired number of images.
         tol: Convergence tolerance for the bisection.
+        rng: Random source for the bisection, which is stochastic.  Defaults to the
+            global `numpy.random` state.
 
     Returns:
         An aligned path with the correct number of images.
@@ -140,7 +162,7 @@ def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float 
             "Inserting image between %d and %d with Cartesian RMSD %10.3f. New length: %d",
             max_i, max_i + 1, dists[max_i], len(geoms) + 1
         )
-        insertion: np.ndarray = _mid_point(atoms, geoms[max_i], geoms[max_i + 1], tol)
+        insertion: np.ndarray = _mid_point(atoms, geoms[max_i], geoms[max_i + 1], tol, rng=rng)
         _, insertion = align_geom(geoms[max_i], insertion)
         geoms.insert(max_i + 1, insertion)
         geoms = list(align_path(geoms)[1])
