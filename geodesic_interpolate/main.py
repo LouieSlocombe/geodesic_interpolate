@@ -35,7 +35,7 @@ def geodesic_interpolate(
         n_images=17,
         output="interpolated.xyz",
         tol=2e-3,
-        max_iter=15,
+        max_iter=50,
         micro_iter=20,
         scaling=1.7,
         friction=1e-2,
@@ -59,7 +59,10 @@ def geodesic_interpolate(
         n_images: Number of images in the interpolated path.
         output: XYZ file to write to.  Only used when `atoms` is a filename.
         tol: Convergence tolerance for the smoothing.
-        max_iter: Maximum number of iterations, or sweeps in the sweeping case.
+        max_iter: Maximum number of iterations, or sweeps in the sweeping case.  This is
+            a ceiling rather than a target: the optimization stops as soon as it meets
+            `tol`, which the test systems do in 13 to 25 iterations.  Setting it too low
+            silently truncates the path part-way through the descent.
         micro_iter: Micro-iterations per image, used only when sweeping.
         scaling: Alpha parameter of the Morse scaler setting the coordinate metric.
         friction: Weight of the friction term regularising the optimization step size.
