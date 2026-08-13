@@ -7,7 +7,6 @@ that make up the coordinates, evaluation of those coordinates together with thei
 Cartesian derivatives (the Wilson B matrix), and the scaling functions that define
 the metric.
 """
-import logging
 from collections.abc import Callable
 from itertools import pairwise
 
@@ -15,8 +14,6 @@ import numpy as np
 from ase.data import atomic_numbers, covalent_radii
 from scipy.sparse import coo_matrix, csr_matrix, identity, triu
 from scipy.spatial import KDTree
-
-logger = logging.getLogger(__name__)
 
 
 def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
@@ -243,7 +240,6 @@ def get_bond_list(geom: np.ndarray,
         atom_numbers = [atomic_numbers[atom.capitalize()] for atom in atoms]
         radius = np.array([covalent_radii[num] for num in atom_numbers])
         re = radius[pairs[:, 0]] + radius[pairs[:, 1]]
-    logger.debug("Pair list contain %d pairs", len(rij_list))
     return rij_list, re
 
 

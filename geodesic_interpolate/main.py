@@ -1,5 +1,4 @@
 """Top-level driver tying the interpolation and smoothing stages together."""
-import logging
 import os
 
 import numpy as np
@@ -9,27 +8,6 @@ from .coord_utils import align_path_to
 from .fileio import from_ase_atoms, read_xyz, to_ase_atoms, write_xyz
 from .geodesic import Geodesic
 from .interpolation import redistribute
-
-logger = logging.getLogger(__name__)
-
-
-def _configure_logging(logging_level: int | str) -> None:
-    """Set the reporting level for this package without touching anyone else's logging.
-
-    `logging.basicConfig` would reconfigure the root logger of whatever application
-    imported this package, so the level is set on the package logger instead.  A handler
-    is attached only when nothing else has set one up, which keeps the progress output
-    visible when running from a bare script.
-
-    Args:
-        logging_level: Level to report progress at, as a name or a number.
-    """
-    package_logger = logging.getLogger(__package__)
-    package_logger.setLevel(logging_level)
-    if not package_logger.handlers and not logging.getLogger().handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("[%(module)-12s]%(message)s"))
-        package_logger.addHandler(handler)
 
 
 def geodesic_interpolate(
@@ -42,7 +20,6 @@ def geodesic_interpolate(
         scaling: float = 1.7,
         friction: float = 1e-2,
         dist_cutoff: float = 3.0,
-        logging_level: int | str = "INFO",
         seed: int = 42,
 ) -> list[Atoms] | None:
     """Interpolate a reaction path between two or more geometries.
@@ -78,7 +55,6 @@ def geodesic_interpolate(
         scaling: Alpha parameter of the Morse scaler setting the coordinate metric.
         friction: Weight of the friction term regularising the optimization step size.
         dist_cutoff: Distance cut-off for building the internal coordinates.
-        logging_level: Logging level for the progress output.
         seed: Seed for the random nudges and image sampling, so runs reproduce.  The
             bisection is stochastic, and without a fixed seed larger systems will not
             give the same path twice.  The seed goes to a `numpy.random.Generator` used
@@ -93,7 +69,6 @@ def geodesic_interpolate(
         ValueError: If fewer than two geometries are supplied.
     """
     rng = np.random.default_rng(seed)
-    _configure_logging(logging_level)
     template = None
     if isinstance(atoms, (str, os.PathLike)):
         symbols, geometries = read_xyz(atoms)

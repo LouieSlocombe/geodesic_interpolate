@@ -104,7 +104,6 @@ Arguments:
   * `scaling` Exponential parameter for the morse potential setting the coordinate metric. (default: 1.7)
   * `friction` Size of the friction term used to prevent very large changes of geometry. (default: 0.01)
   * `dist_cutoff` Cut-off distance for a pair of atoms to be included in the coordinate system. (default: 3.0)
-  * `logging_level` Logging level to adopt [ DEBUG | INFO | WARNING | ERROR ]. (default: INFO)
   * `seed` Seed for the random number generator. (default: 42)
 
 Sweeping — optimizing one image at a time instead of moving them all together — is

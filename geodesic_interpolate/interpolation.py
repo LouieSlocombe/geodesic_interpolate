@@ -4,16 +4,12 @@ Uses geodesic lengths as the criterion for adding bisection points until the ima
 count matches what was asked for.  The result is only a starting guess: a following
 round of geodesic smoothing is needed to get the final path.
 """
-import logging
-
 import numpy as np
 from scipy.optimize import least_squares
 from scipy.sparse import identity, vstack
 
 from .coord_utils import align_geom, align_path, compute_wij, get_bond_list, morse_scaler
 from .geodesic import Geodesic
-
-logger = logging.getLogger(__name__)
 
 
 def _mid_point(atoms: list[str],
@@ -85,7 +81,6 @@ def _mid_point(atoms: list[str],
         # The inner loop minimises from either end point in turn as the starting guess
         for coef in [0.02, 0.98]:
             x0: np.ndarray = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * rng.random(geom1.size)
-            logger.debug("Starting least-squares minimization of bisection point at %7.2f.", coef)
             # Residuals are the difference from the target internals, plus a friction
             # term holding the geometry near where it started
             result = least_squares(
@@ -101,7 +96,6 @@ def _mid_point(atoms: list[str],
             extras = set(new_rij) - set(rij_list)
 
             if extras:
-                logger.info("  Screened pairs came into contact. Adding reference point.")
                 # Widen the coordinate system and start the minimisation over
                 geom_list.append(x_mid)
                 add_pair.update(extras)
@@ -112,14 +106,11 @@ def _mid_point(atoms: list[str],
                                 [geom1, x_mid, geom2],
                                 scaler=0.7,
                                 threshold=threshold,
-                                log_level=logging.DEBUG,
                                 friction=1,
                                 rng=rng)
             smoother.compute_displacements()
             width = max(np.sqrt(np.mean((g - smoother.path[1]) ** 2)) for g in [geom1, geom2])
             dist = width + smoother.length
-
-            logger.debug("  Trial path length: %8.3f after %d iterations", dist, result["nfev"])
             if dist < d_min:
                 d_min, x_min = dist, smoother.path[1]
         else:
@@ -156,10 +147,6 @@ def redistribute(atoms: list[str], geoms: list[np.ndarray], n_images: int, tol: 
     while len(geoms) < n_images:
         dists = [np.sqrt(np.mean((g1 - g2) ** 2)) for g1, g2 in zip(geoms[1:], geoms)]
         max_i: int = int(np.argmax(dists))
-        logger.info(
-            "Inserting image between %d and %d with Cartesian RMSD %10.3f. New length: %d",
-            max_i, max_i + 1, dists[max_i], len(geoms) + 1
-        )
         insertion: np.ndarray = _mid_point(atoms, geoms[max_i], geoms[max_i + 1], tol, rng=rng)
         _, insertion = align_geom(geoms[max_i], insertion)
         geoms.insert(max_i + 1, insertion)
@@ -171,10 +158,6 @@ def redistribute(atoms: list[str], geoms: list[np.ndarray], n_images: int, tol: 
         # that can be dropped with the least disruption
         dists = [np.sqrt(np.mean((g1 - g2) ** 2)) for g1, g2 in zip(geoms[2:], geoms)]
         min_i: int = int(np.argmin(dists))
-        logger.info(
-            "Removing image %d. Cartesian RMSD of merged section %10.3f",
-            min_i + 1, dists[min_i]
-        )
         del geoms[min_i + 1]
         geoms = list(align_path(geoms)[1])
 
