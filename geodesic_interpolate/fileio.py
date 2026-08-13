@@ -25,22 +25,49 @@ def from_ase_atoms(atoms: list[Atoms]) -> tuple[list[str], list[np.ndarray]]:
     return atom_names, coords
 
 
-def to_ase_atoms(atoms: list[str], coords: np.ndarray | list[np.ndarray]) -> list[Atoms]:
+def to_ase_atoms(atoms: list[str],
+                 coords: np.ndarray | list[np.ndarray],
+                 template: Atoms | None = None) -> list[Atoms]:
     """Rebuild a list of ASE Atoms objects from symbols and coordinates.
 
     Args:
         atoms: Element symbols of all the atoms.
         coords: Cartesian coordinates, of shape ``(n_images, n_atoms, 3)``.  A single
             frame of shape ``(n_atoms, 3)`` is accepted too.
+        template: Atoms object to take everything other than the positions from, so that
+            the unit cell, boundary conditions, constraints, tags and the rest survive a
+            round trip through this module.  Each frame is a copy of the template with
+            its positions replaced; as with `ase.Atoms.copy`, the calculator is not
+            carried over, since its results belong to the geometry it was attached to.
+            Any constraints come along for later use but are not applied to the
+            coordinates, which are always exactly the ones given.  Without a template the
+            frames are built from the symbols alone and carry no cell.
 
     Returns:
         One ASE Atoms object per frame.
+
+    Raises:
+        ValueError: If `template` describes a different set of atoms from `atoms`.
     """
     if isinstance(coords, list):
         coords = np.array(coords)
     if coords.ndim == 2:
         coords = coords[np.newaxis, ...]  # Add a new axis for single frame
-    return [Atoms(symbols=atoms, positions=frame) for frame in coords]
+    if template is None:
+        return [Atoms(symbols=atoms, positions=frame) for frame in coords]
+
+    symbols = [atom.capitalize() for atom in atoms]
+    if template.get_chemical_symbols() != symbols:
+        raise ValueError(f"Template describes {template.get_chemical_formula()}, which is not the "
+                         f"same system as the {len(symbols)} atoms given")
+    images = []
+    for frame in coords:
+        image = template.copy()
+        # Not the default, which would let a constraint such as `FixAtoms` quietly drag
+        # atoms back to where the template had them and corrupt the interpolated path
+        image.set_positions(frame, apply_constraint=False)
+        images.append(image)
+    return images
 
 
 def read_xyz(filename: Filename) -> tuple[list[str], list[np.ndarray]]:

@@ -43,6 +43,30 @@ def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
     return max_rmsd, path
 
 
+def _kabsch_rotation(ref_centered: np.ndarray, geom_centered: np.ndarray) -> np.ndarray:
+    """Find the rotation that best takes one centred geometry onto another.
+
+    The SVD of the covariance matrix of the two geometries gives the optimal rotation.
+    Both arguments must already have their centres at the origin.
+
+    Args:
+        ref_centered: The centred reference geometry to rotate towards.
+        geom_centered: The centred geometry to be rotated.
+
+    Returns:
+        The rotation matrix, to be applied on the right of a set of centred coordinates.
+    """
+    cov = np.dot(geom_centered.T, ref_centered)
+    v, _, w = np.linalg.svd(cov)
+
+    # A negative determinant means the SVD produced a reflection rather than a
+    # rotation.  Flipping the least significant axis gives a proper rotation.
+    if np.linalg.det(v) * np.linalg.det(w) < 0.0:
+        v[:, -1] *= -1
+
+    return np.dot(v, w)
+
+
 def align_geom(ref_geom: np.ndarray, geom: np.ndarray) -> tuple[float, np.ndarray]:
     """Find the rigid-body motion that maximally overlaps one geometry with another.
 
@@ -63,19 +87,38 @@ def align_geom(ref_geom: np.ndarray, geom: np.ndarray) -> tuple[float, np.ndarra
     ref_geom_centered = ref_geom - center
     geom_centered = geom - np.mean(geom, axis=0)
 
-    cov = np.dot(geom_centered.T, ref_geom_centered)
-    v, _, w = np.linalg.svd(cov)
-
-    # A negative determinant means the SVD produced a reflection rather than a
-    # rotation.  Flipping the least significant axis gives a proper rotation.
-    if np.linalg.det(v) * np.linalg.det(w) < 0.0:
-        v[:, -1] *= -1
-
-    rotation_matrix = np.dot(v, w)
+    rotation_matrix = _kabsch_rotation(ref_geom_centered, geom_centered)
     aligned_geom = np.dot(geom_centered, rotation_matrix) + center
     rmsd = np.sqrt(np.mean((aligned_geom - ref_geom) ** 2))
 
     return rmsd, aligned_geom
+
+
+def align_path_to(ref_geom: np.ndarray, path: np.ndarray) -> np.ndarray:
+    """Move a whole path rigidly so that its first image sits on a reference geometry.
+
+    `align_path` leaves the path centred on the origin and rotated onto its own first
+    image, which is a frame of the optimizer's choosing rather than the one the caller
+    handed in.  That is immaterial for an isolated molecule, but a unit cell only
+    describes where the atoms are in the frame it came with, so a periodic path has to be
+    put back before its cell means anything.
+
+    One rotation and translation, taken from the first image, is applied to every image,
+    so the shape of the path and its length are untouched.
+
+    Args:
+        ref_geom: Geometry to put the first image back onto, of shape ``(n_atoms, 3)``.
+        path: The path to move, of shape ``(n_images, n_atoms, 3)``.
+
+    Returns:
+        The path in the reference geometry's frame.  This is a copy.
+    """
+    path = np.asarray(path, dtype=float)
+    center = np.mean(ref_geom, axis=0)
+    origin = np.mean(path[0], axis=0)
+
+    rotation_matrix = _kabsch_rotation(ref_geom - center, path[0] - origin)
+    return np.dot(path - origin, rotation_matrix) + center
 
 
 def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float) -> list[tuple[int, int]]:

@@ -5,6 +5,7 @@ import os
 import numpy as np
 from ase import Atoms
 
+from .coord_utils import align_path_to
 from .fileio import from_ase_atoms, read_xyz, to_ase_atoms, write_xyz
 from .geodesic import Geodesic
 from .interpolation import redistribute
@@ -53,6 +54,15 @@ def geodesic_interpolate(
     Input and output mirror each other.  Given ASE Atoms objects the interpolated path
     comes back as Atoms objects; given a filename it is written to `output` instead.
 
+    Given Atoms objects, everything the interpolation does not itself touch is taken from
+    the first frame and carried onto every image: the unit cell, the boundary conditions,
+    constraints, tags and so on.  A periodic path is also moved back onto the frame of
+    reference of the input, since the optimization otherwise leaves it centred and rotated
+    into a frame of its own, which would put the atoms in the wrong place relative to the
+    cell.  Note that the interpolation itself is not periodic: the internal coordinates
+    are plain inter-atomic distances with no minimum image convention, so a bond that
+    crosses a cell boundary is not handled.
+
     Args:
         atoms: Either a list of ASE Atoms objects, or the name of an XYZ file holding
             the end points.  Only the first and last geometries need be meaningful,
@@ -84,10 +94,14 @@ def geodesic_interpolate(
     """
     rng = np.random.default_rng(seed)
     _configure_logging(logging_level)
+    template = None
     if isinstance(atoms, (str, os.PathLike)):
         symbols, geometries = read_xyz(atoms)
     elif isinstance(atoms, list):
         symbols, geometries = from_ase_atoms(atoms)
+        # Everything the interpolation does not touch is carried over from the first
+        # frame, which is also where the symbols come from
+        template = atoms[0]
     else:
         raise TypeError("Input must be an ASE Atoms object or a filename.")
 
@@ -108,8 +122,14 @@ def geodesic_interpolate(
     else:
         smoother.smooth(tol=tol, max_iter=max_iter)
 
-    if isinstance(atoms, (str, os.PathLike)):
+    if template is None:
         write_xyz(output, symbols, smoother.path)
         return None
-    else:
-        return to_ase_atoms(symbols, smoother.path)
+
+    # The optimization leaves the path in its own centred and rotated frame.  That is of
+    # no consequence for an isolated molecule, but a cell describes where the atoms are
+    # only in the frame it was given in, so a periodic path is moved back onto its input
+    path = smoother.path
+    if template.cell.rank > 0 or template.pbc.any():
+        path = align_path_to(template.get_positions(), path)
+    return to_ase_atoms(symbols, path, template=template)

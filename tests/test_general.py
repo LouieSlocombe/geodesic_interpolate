@@ -14,6 +14,7 @@ import pytest
 from ase import Atoms
 from ase.build import molecule
 from ase.calculators.emt import EMT
+from ase.constraints import FixAtoms
 from ase.io import read
 from ase.lattice.cubic import FaceCenteredCubic
 from ase.mep import NEB
@@ -137,9 +138,69 @@ def test_read_xyz_rejects_empty_file(tmp_path):
         gi.read_xyz(empty)
 
 
-# The interpolated path is handed to ASE as bare Atoms objects, so the cell and boundary
-# conditions of the input do not survive the round trip and these NEBs run as clusters.
-# Both are smoke tests: they check the path ASE is given, then that ASE can relax it.
+def test_periodic_input_keeps_its_cell():
+    """A periodic system keeps its cell, and comes back in the frame that cell describes."""
+    end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
+    molecular = gi.geodesic_interpolate(end_points, n_images=5)
+
+    for end_point in end_points:
+        end_point.set_cell([12.0, 13.0, 14.0])
+        end_point.set_pbc(True)
+        end_point.set_tags(range(len(end_point)))
+    path = gi.geodesic_interpolate(end_points, n_images=5)
+
+    for image in path:
+        assert np.allclose(image.get_cell(), end_points[0].get_cell())
+        assert image.pbc.all()
+        assert list(image.get_tags()) == list(range(len(end_points[0])))
+    # Without the frame being restored the path would be centred on the origin instead,
+    # leaving the atoms sitting outside the cell they claim to be in
+    assert np.allclose(path[0].get_positions(), end_points[0].get_positions(), atol=1e-6)
+    # Restoring the frame is one rigid motion applied to every image, so it moves the path
+    # without deforming it: same path, different frame
+    assert_bond_lengths_equal(path, molecular, tol=1e-10)
+
+
+def test_non_periodic_input_is_left_in_the_optimizer_frame():
+    """The frame is only restored for periodic input, so molecules are unaffected."""
+    end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
+
+    path = gi.geodesic_interpolate(end_points, n_images=5)
+
+    assert path[0].get_cell().rank == 0
+    assert not path[0].pbc.any()
+    assert np.allclose(path[0].get_positions().mean(axis=0), 0.0, atol=1e-8)
+
+
+def test_constraints_are_carried_over_without_moving_atoms():
+    """A constraint has to survive for the NEB, without ASE applying it to the path."""
+    end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
+    unconstrained = gi.geodesic_interpolate(end_points, n_images=5)
+
+    # The interpolation only ever reads symbols and positions, so constraining an atom
+    # must not change the path it produces
+    for end_point in end_points:
+        end_point.set_constraint(FixAtoms(indices=[0]))
+    constrained = gi.geodesic_interpolate(end_points, n_images=5)
+
+    assert all(isinstance(image.constraints[0], FixAtoms) for image in constrained)
+    # `set_positions` applies constraints by default, which would pin atom 0 of every
+    # image to where the first end point had it rather than where the path puts it
+    assert_paths_equal(constrained, unconstrained, tol=1e-12)
+
+
+def test_to_ase_atoms_rejects_mismatched_template():
+    """A template for a different system would silently override the requested symbols."""
+    atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
+    template = Atoms(symbols=['Ar'] * len(atom_names), positions=coords[0])
+
+    with pytest.raises(ValueError, match="same system"):
+        gi.to_ase_atoms(atom_names, coords, template=template)
+
+
+# Both NEB tests are smoke tests: they check the path ASE is given, then that ASE can
+# relax it.  The slab keeps its cell and boundary conditions through the interpolation,
+# so these run periodically, as the slab is meant to be.
 
 @pytest.mark.slow
 def test_neb_on_slab_adatom():

@@ -69,6 +69,15 @@ number of images, then smooths it into a geodesic.
 Input and output mirror each other.  Pass a filename and the path is written to an XYZ
 file; pass ASE `Atoms` objects and the path comes back as `Atoms` objects.
 
+Given `Atoms` objects, everything the interpolation does not itself touch is taken from the
+first frame and carried onto every image: the unit cell, the boundary conditions,
+constraints, tags and so on.  A periodic system also comes back in the frame of reference
+it went in with, because the optimization otherwise leaves the path centred and rotated
+into a frame of its own, which would put the atoms in the wrong place relative to the cell.
+The interpolation itself is not periodic, though — the internal coordinates are plain
+inter-atomic distances with no minimum image convention, so a bond that crosses a cell
+boundary is not handled.
+
 ```python
 import geodesic_interpolate as gi
 from ase.io import read
