@@ -6,17 +6,18 @@ the feasibility problems that come with redundant internals, where an arbitrary 
 internal coordinate values need not correspond to any real geometry.
 """
 import logging
+from collections.abc import Callable
 
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.sparse import bmat, identity
+from scipy.sparse import bmat, csr_matrix, identity
 
-from .coord_utils import align_path, get_bond_list, morse_scaler, compute_wij
+from .coord_utils import align_path, compute_wij, get_bond_list, morse_scaler
 
 logger = logging.getLogger(__name__)
 
 
-class Geodesic(object):
+class Geodesic:
     """Optimizer that finds a geodesic in redundant internal coordinates.
 
     The heart of it is the path length in the internal metric: the length of each
@@ -25,14 +26,14 @@ class Geodesic(object):
     """
 
     def __init__(self,
-                 atoms,
-                 path,
-                 scaler=1.7,
-                 threshold=3.0,
-                 min_neighbors=4,
-                 log_level=logging.INFO,
-                 friction=1e-3,
-                 rng=None):
+                 atoms: list[str],
+                 path: np.ndarray,
+                 scaler: float | Callable = 1.7,
+                 threshold: float = 3.0,
+                 min_neighbors: int = 4,
+                 log_level: int = logging.INFO,
+                 friction: float = 1e-3,
+                 rng: np.random.Generator | None = None):
         """Initialise the interpolater.
 
         Args:
@@ -51,7 +52,7 @@ class Geodesic(object):
             friction: Weight of the friction term in the target function, which keeps
                 the optimizer from taking steps large enough to blow the path up.
             rng: Random source used when sampling images to build the coordinates.
-                Defaults to the global `numpy.random` state.
+                Defaults to a fresh unseeded `numpy.random.Generator`.
 
         Raises:
             ValueError: If the path is not three dimensional.
@@ -82,7 +83,7 @@ class Geodesic(object):
         self.dwdR_mid = [None] * (self.n_images - 1)
         self.displacements = self.grad = self.segment = None
 
-    def update_intc(self):
+    def update_intc(self) -> None:
         """Fill in any internal coordinates and derivatives currently marked unknown.
 
         Missing entries are flagged with `None` in the internal storage; this finds
@@ -101,7 +102,7 @@ class Geodesic(object):
                 Xm = (X0 + X1) / 2
                 self.w_mid[i], self.dwdR_mid[i] = compute_wij(Xm, self.rij_list, self.scaler, sparse=True)
 
-    def update_geometry(self, X, start, end):
+    def update_geometry(self, X: np.ndarray, start: int, end: int) -> bool:
         """Move a segment of the path, invalidating everything that depended on it.
 
         The internal coordinates, derivatives and midpoints of the affected images are
@@ -128,7 +129,8 @@ class Geodesic(object):
         self.w_mid[first_mid:end] = [None] * (min(end, self.n_images - 1) - first_mid)
         return True
 
-    def compute_displacements(self, start=1, end=-1, dx=None, friction=1e-3):
+    def compute_displacements(self, start: int = 1, end: int = -1,
+                              dx: np.ndarray | None = None, friction: float = 1e-3) -> None:
         """Compute the displacement vectors along a section of the path, and its length.
 
         Each segment is split at its midpoint and measured in two halves, which is what
@@ -165,7 +167,7 @@ class Geodesic(object):
             trans = friction * dx  # Translation from initial geometry.  friction term
         self.displacements = np.concatenate(vecs_l + vecs_r + [trans])
 
-    def compute_disp_grad(self, start, end, friction=1e-3):
+    def compute_disp_grad(self, start: int, end: int, friction: float = 1e-3) -> None:
         """Compute derivatives of the displacement vectors with respect to Cartesians.
 
         Moving one image changes the two half-segments on either side of it directly,
@@ -187,11 +189,11 @@ class Geodesic(object):
         Sets `self.grad`.
         """
         # Calculate derivatives of displacement vectors with respect to image Cartesians
-        l = end - start + 1
         n_seg = end - start
+        n_rows = n_seg + 1  # One more image than segments, as each segment joins two
         n_dof = 3 * self.n_atoms
-        blocks_l = [[None] * n_seg for _ in range(l)]
-        blocks_r = [[None] * n_seg for _ in range(l)]
+        blocks_l = [[None] * n_seg for _ in range(n_rows)]
+        blocks_r = [[None] * n_seg for _ in range(n_rows)]
         for i, image in enumerate(range(start, end)):
             dmid1 = self.dwdR_mid[image - 1] / 2
             dmid2 = self.dwdR_mid[image] / 2
@@ -205,7 +207,9 @@ class Geodesic(object):
         blocks_f = [[friction_block if k == i else None for i in range(n_seg)] for k in range(n_seg)]
         self.grad = bmat(blocks_l + blocks_r + blocks_f, format='csr')
 
-    def compute_target_func(self, X=None, start=1, end=-1, log_level=logging.INFO, x0=None, friction=1e-3):
+    def compute_target_func(self, X: np.ndarray | None = None, start: int = 1, end: int = -1,
+                            log_level: int = logging.INFO, x0: np.ndarray | None = None,
+                            friction: float = 1e-3) -> None:
         """Compute the vectorised target function used for least-squares minimisation.
 
         Args:
@@ -233,7 +237,7 @@ class Geodesic(object):
         logger.log(log_level, "Iteration %3d: Length %10.3f |dL|=%7.3e", self.n_eval, self.length, self.optimality)
         self.n_eval += 1
 
-    def target_func(self, X, **kwargs):
+    def target_func(self, X: np.ndarray, **kwargs) -> np.ndarray:
         """Residuals for the optimizer.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved
@@ -242,7 +246,7 @@ class Geodesic(object):
         self.compute_target_func(X, **kwargs)
         return self.displacements
 
-    def target_deriv(self, X, **kwargs):
+    def target_deriv(self, X: np.ndarray, **kwargs) -> csr_matrix:
         """Jacobian for the optimizer.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved
@@ -254,13 +258,13 @@ class Geodesic(object):
         return self.grad
 
     def smooth(self,
-               tol=1e-3,
-               max_iter=50,
-               start=1,
-               end=-1,
-               log_level=logging.INFO,
-               friction=None,
-               xref=None):
+               tol: float = 1e-3,
+               max_iter: int = 50,
+               start: int = 1,
+               end: int = -1,
+               log_level: int = logging.INFO,
+               friction: float | None = None,
+               xref: np.ndarray | None = None) -> np.ndarray:
         """Minimise the path length as a single function of all the image coordinates.
 
         In principle this is very efficient, but it can get costly for large systems
@@ -303,7 +307,8 @@ class Geodesic(object):
         logger.log(log_level, "Final path length: %12.5f  Max RMSD in path: %10.2f", self.length, rmsd)
         return self.path
 
-    def sweep(self, tol=1e-3, max_iter=50, micro_iter=20, start=1, end=-1):
+    def sweep(self, tol: float = 1e-3, max_iter: int = 50, micro_iter: int = 20,
+              start: int = 1, end: int = -1) -> np.ndarray:
         """Minimise the path length one image at a time, sweeping back and forth.
 
         Less efficient per iteration than `smooth`, but it scales far more kindly with

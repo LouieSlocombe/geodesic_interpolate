@@ -1,15 +1,13 @@
 """File IO utilities, and conversion to and from ASE Atoms objects."""
 import os
-from typing import List, Tuple
-from typing import Union
 
 import numpy as np
 from ase import Atoms
 
-Filename = Union[str, os.PathLike]
+Filename = str | os.PathLike
 
 
-def from_ase_atoms(atoms: List[Atoms]) -> Tuple[List[str], List[np.ndarray]]:
+def from_ase_atoms(atoms: list[Atoms]) -> tuple[list[str], list[np.ndarray]]:
     """Split a list of ASE Atoms objects into symbols and coordinates.
 
     Args:
@@ -21,13 +19,13 @@ def from_ase_atoms(atoms: List[Atoms]) -> Tuple[List[str], List[np.ndarray]]:
         coords: Cartesian coordinates for every frame.
     """
     atom_names = atoms[0].get_chemical_symbols()
-    coords: List[np.ndarray] = []
+    coords: list[np.ndarray] = []
     for atom in atoms:
         coords.append(np.array(atom.get_positions()))
     return atom_names, coords
 
 
-def to_ase_atoms(atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) -> List[Atoms]:
+def to_ase_atoms(atoms: list[str], coords: np.ndarray | list[np.ndarray]) -> list[Atoms]:
     """Rebuild a list of ASE Atoms objects from symbols and coordinates.
 
     Args:
@@ -45,7 +43,7 @@ def to_ase_atoms(atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) 
     return [Atoms(symbols=atoms, positions=frame) for frame in coords]
 
 
-def read_xyz(filename: Filename) -> Tuple[List[str], List[np.ndarray]]:
+def read_xyz(filename: Filename) -> tuple[list[str], list[np.ndarray]]:
     """Read an XYZ file and return the atom names and coordinates.
 
     Args:
@@ -59,29 +57,29 @@ def read_xyz(filename: Filename) -> Tuple[List[str], List[np.ndarray]]:
     Raises:
         ValueError: If the file is empty or does not parse as XYZ.
     """
-    coords: List[np.ndarray] = []
-    with open(filename, 'r') as f:
+    coords: list[np.ndarray] = []
+    with open(filename, encoding='utf-8') as f:
         for line in f:
             if not line.strip():  # Blank line between or after frames
                 continue
             try:
                 n_atoms = int(line)  # Read number of atoms
                 next(f)  # Skip over comments
-                atom_names: List[str] = []
+                atom_names: list[str] = []
                 geom = np.zeros((n_atoms, 3), float)
                 for i in range(n_atoms):
                     line = next(f).split()
                     atom_names.append(line[0])
                     geom[i] = line[1:4]  # Numpy auto-converts str to float
-            except (TypeError, ValueError, IOError, IndexError, StopIteration):
-                raise ValueError('Incorrect XYZ file format')
+            except (TypeError, ValueError, OSError, IndexError, StopIteration) as err:
+                raise ValueError('Incorrect XYZ file format') from err
             coords.append(geom)
     if not coords:
         raise ValueError("File is empty")
     return atom_names, coords
 
 
-def write_xyz(filename: Filename, atoms: List[str], coords: Union[np.ndarray, List[np.ndarray]]) -> None:
+def write_xyz(filename: Filename, atoms: list[str], coords: np.ndarray | list[np.ndarray]) -> None:
     """Write atom names and coordinate data to an XYZ file.
 
     Args:
@@ -92,7 +90,7 @@ def write_xyz(filename: Filename, atoms: List[str], coords: Union[np.ndarray, Li
     """
     # Not `np.atleast_3d`, which would turn a single frame into `(n_atoms, 3, 1)`
     coords = np.asarray(coords, dtype=float).reshape(-1, len(atoms), 3)
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         for i, X in enumerate(coords):
             f.write(f"{len(atoms)}\n")
             f.write(f"Frame {i}\n")

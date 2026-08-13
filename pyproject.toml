@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geodesic_interpolate"
-version = "0.0.1"
+version = "0.1.0"
 description = "Interpolation and smoothing of reaction paths with geodesics in redundant internal coordinates."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
@@ -38,6 +38,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
 ]
@@ -46,6 +47,7 @@ classifiers = [
 dev = [
   "pytest",
   "pytest-cov",
+  "ruff",
 ]
 
 [project.urls]
@@ -55,3 +57,23 @@ Repository = "https://github.com/LouieSlocombe/geodesic_interpolate"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["geodesic_interpolate", "geodesic_interpolate.*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# The tests resolve their data relative to their own file, so they run from anywhere; this
+# just puts the package on the path so a source checkout needs no install to be tested
+pythonpath = ["."]
+markers = [
+  "slow: protein-scale interpolations and the ASE NEB comparisons (deselect with -m 'not slow')",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# `flake8-bugbear` is left out on purpose: it flags the closures in `interpolation.py`, which
+# are called synchronously inside the loop that binds them, and every `zip(path, path[1:])`,
+# which relies on the ragged behaviour that `strict=True` forbids
+select = ["E", "F", "W", "I", "UP", "NPY", "RUF"]

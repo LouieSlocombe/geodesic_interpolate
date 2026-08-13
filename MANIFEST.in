@@ -1,7 +1,6 @@
 include README.md
 include citations.bib
 
-# The tests compare against ~1.7 MB of reference paths in tests/data and must be
-# run from the tests directory, so they are kept in the repository rather than
-# shipped in the source distribution.
+# The tests compare against ~1.7 MB of reference paths in tests/data, so they are kept
+# in the repository rather than shipped in the source distribution.
 prune tests

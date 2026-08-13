@@ -5,26 +5,24 @@ count matches what was asked for.  The result is only a starting guess: a follow
 round of geodesic smoothing is needed to get the final path.
 """
 import logging
-from typing import Any, List, Optional
 
 import numpy as np
 from scipy.optimize import least_squares
 from scipy.sparse import identity, vstack
 
-from .coord_utils import align_geom, align_path
-from .coord_utils import get_bond_list, compute_wij, morse_scaler
+from .coord_utils import align_geom, align_path, compute_wij, get_bond_list, morse_scaler
 from .geodesic import Geodesic
 
 logger = logging.getLogger(__name__)
 
 
-def _mid_point(atoms: Any,
+def _mid_point(atoms: list[str],
                geom1: np.ndarray,
                geom2: np.ndarray,
                tol: float = 1e-2,
                nudge: float = 0.01,
                threshold: float = 4.0,
-               rng: Optional[Any] = None) -> np.ndarray:
+               rng: np.random.Generator | None = None) -> np.ndarray:
     """Find the geometry whose internal coordinates sit closest to the average of two others.
 
     A least-squares minimisation against the average of the two end points, run twice,
@@ -46,15 +44,15 @@ def _mid_point(atoms: Any,
         nudge: Size of the random nudge added to the starting geometry.  Helps to turn
             up different solutions, and to break symmetry when the optimal path does.
         threshold: Distance cut-off for including an atom pair in the coordinates.
-        rng: Random source for the nudge and the image sampling.  Defaults to the global
-            `numpy.random` state.
+        rng: Random source for the nudge and the image sampling.  Defaults to a fresh
+            unseeded `numpy.random.Generator`.
 
     Returns:
         The optimised mid-point, bisecting the two end points in internal coordinates.
     """
     geom1, geom2 = np.array(geom1, dtype=float), np.array(geom2, dtype=float)
     if rng is None:
-        rng = np.random
+        rng = np.random.default_rng()
     add_pair: set = set()
     geom_list: list[np.ndarray] = [geom1, geom2]
 
@@ -86,7 +84,7 @@ def _mid_point(atoms: Any,
 
         # The inner loop minimises from either end point in turn as the starting guess
         for coef in [0.02, 0.98]:
-            x0: np.ndarray = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * rng.random_sample(geom1.size)
+            x0: np.ndarray = (geom1 * coef + geom2 * (1 - coef)).ravel() + nudge * rng.random(geom1.size)
             logger.debug("Starting least-squares minimization of bisection point at %7.2f.", coef)
             # Residuals are the difference from the target internals, plus a friction
             # term holding the geometry near where it started
@@ -99,7 +97,7 @@ def _mid_point(atoms: Any,
             )
             x_mid: np.ndarray = result["x"].reshape(-1, 3)
             # Rebuild the pair list including the new point and check for fresh contacts
-            new_rij, _ = get_bond_list(geom_list + [x_mid], threshold=threshold, min_neighbors=0, rng=rng)
+            new_rij, _ = get_bond_list([*geom_list, x_mid], threshold=threshold, min_neighbors=0, rng=rng)
             extras = set(new_rij) - set(rij_list)
 
             if extras:
@@ -132,8 +130,8 @@ def _mid_point(atoms: Any,
     return x_min
 
 
-def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float = 1e-2,
-                 rng: Optional[Any] = None) -> List[np.ndarray]:
+def redistribute(atoms: list[str], geoms: list[np.ndarray], n_images: int, tol: float = 1e-2,
+                 rng: np.random.Generator | None = None) -> list[np.ndarray]:
     """Add or remove images so the path has the requested number of them.
 
     If there are too few, new points are added by bisecting the largest RMSD gap.  If
@@ -145,8 +143,8 @@ def redistribute(atoms: Any, geoms: List[np.ndarray], n_images: int, tol: float 
         geoms: Geometries of the original path.
         n_images: The desired number of images.
         tol: Convergence tolerance for the bisection.
-        rng: Random source for the bisection, which is stochastic.  Defaults to the
-            global `numpy.random` state.
+        rng: Random source for the bisection, which is stochastic.  Defaults to a fresh
+            unseeded `numpy.random.Generator`.
 
     Returns:
         An aligned path with the correct number of images.

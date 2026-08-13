@@ -8,8 +8,8 @@ Cartesian derivatives (the Wilson B matrix), and the scaling functions that defi
 the metric.
 """
 import logging
-from typing import Any, Callable
-from typing import List, Tuple, Optional, Union
+from collections.abc import Callable
+from itertools import pairwise
 
 import numpy as np
 from ase.data import atomic_numbers, covalent_radii
@@ -36,7 +36,7 @@ def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
     path = np.array(path, dtype=float)
     path[0] -= np.mean(path[0], axis=0)
     max_rmsd = 0.0
-    for g, next_g in zip(path, path[1:]):
+    for g, next_g in pairwise(path):
         rmsd, aligned_geom = align_geom(g, next_g)
         next_g[:] = aligned_geom
         max_rmsd = max(max_rmsd, rmsd)
@@ -78,7 +78,7 @@ def align_geom(ref_geom: np.ndarray, geom: np.ndarray) -> tuple[float, np.ndarra
     return rmsd, aligned_geom
 
 
-def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float) -> List[Tuple[int, int]]:
+def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float) -> list[tuple[int, int]]:
     """List the atom pairs separated by three or fewer bonds in one geometry.
 
     Every such pair is a bonded pair with an optional extra bond tacked on at either
@@ -107,13 +107,13 @@ def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float)
 
 
 def get_bond_list(geom: np.ndarray,
-                  atoms: Optional[List[str]] = None,
+                  atoms: list[str] | None = None,
                   threshold: float = 4.0,
                   min_neighbors: int = 4,
                   snapshots: int = 30,
                   bond_threshold: float = 1.8,
-                  enforce: Tuple[Tuple[int, int], ...] = (),
-                  rng: Optional[Any] = None) -> Tuple[List[Tuple[int, int]], np.ndarray]:
+                  enforce: tuple[tuple[int, int], ...] = (),
+                  rng: np.random.Generator | None = None) -> tuple[list[tuple[int, int]], np.ndarray]:
     """Get the list of atom pairs that define the internal coordinate system.
 
     Samples images from the path and collects every pair of atoms that comes within
@@ -134,9 +134,9 @@ def get_bond_list(geom: np.ndarray,
         bond_threshold: Distance below which two atoms count as bonded, used to work
             out which pairs are within three bonds of each other.
         enforce: Pairs to include regardless of how far apart the atoms are.
-        rng: Random source for choosing which images to sample.  Defaults to the global
-            `numpy.random` state.  Pass a `numpy.random.RandomState` to keep the choice
-            reproducible without disturbing the caller's global state.
+        rng: Random source for choosing which images to sample.  Defaults to a fresh
+            unseeded `numpy.random.Generator`.  Pass a seeded one to keep the choice
+            reproducible without disturbing anyone else's random state.
 
     Returns:
         rij_list: List of the ``(i, j)`` atom pairs making up the coordinates.
@@ -151,14 +151,14 @@ def get_bond_list(geom: np.ndarray,
     n_atoms = geom.shape[1]
     min_neighbors = min(min_neighbors, n_atoms - 1)
     if rng is None:
-        rng = np.random
+        rng = np.random.default_rng()
 
     # Always look at both end points, plus a random selection of the images between
     # them, so that a long path costs no more to analyse than a short one
     snapshots = min(len(geom), snapshots)
     images = [0, len(geom) - 1]
     if snapshots > 2:
-        images.extend(rng.choice(range(1, len(geom) - 1), snapshots - 2, replace=False))
+        images.extend(rng.choice(np.arange(1, len(geom) - 1), snapshots - 2, replace=False))
     # Build the neighbour list for each sampled image and merge them together
     rij_set = set(enforce)
     for image in images:
@@ -213,7 +213,7 @@ _PAIR_INDEX_CACHE: dict = {}
 _PAIR_INDEX_CACHE_SIZE = 8
 
 
-def _pair_index(rij_list: List[Tuple[int, int]], n_atoms: int) -> Tuple[np.ndarray, ...]:
+def _pair_index(rij_list: list[tuple[int, int]], n_atoms: int) -> tuple[np.ndarray, ...]:
     """Build, or look up, the index arrays describing a pair list.
 
     Args:
@@ -275,9 +275,9 @@ def compute_rij(geom: np.ndarray,
 
 
 def compute_wij(geom: np.ndarray,
-                rij_list: List[Tuple[int, int]],
-                func: Callable[[np.ndarray], Tuple[np.ndarray, np.ndarray]],
-                sparse: bool = False) -> Tuple[np.ndarray, Union[np.ndarray, csr_matrix]]:
+                rij_list: list[tuple[int, int]],
+                func: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]],
+                sparse: bool = False) -> tuple[np.ndarray, np.ndarray | csr_matrix]:
     """Calculate a list of scaled distances and their Cartesian derivatives.
 
     Same as `compute_rij`, except each distance is passed through a scaling function
@@ -320,8 +320,8 @@ def compute_wij(geom: np.ndarray,
     return wij, b_mat
 
 
-def morse_scaler(re: float = 1.5, alpha: float = 1.7, beta: float = 0.01) -> Callable[
-    [np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+def morse_scaler(re: float = 1.5, alpha: float = 1.7,
+                 beta: float = 0.01) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Build a scaling function based on a Morse potential.
 
     The returned function takes an inter-nuclear distance and gives back the scaled
@@ -338,7 +338,7 @@ def morse_scaler(re: float = 1.5, alpha: float = 1.7, beta: float = 0.01) -> Cal
         beta: Weight of the long-range tail.
     """
 
-    def scaler(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def scaler(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         ratio = x / re
         val1 = np.exp(alpha * (1.0 - ratio))
         val2 = beta / ratio
@@ -348,8 +348,8 @@ def morse_scaler(re: float = 1.5, alpha: float = 1.7, beta: float = 0.01) -> Cal
     return scaler
 
 
-def elu_scaler(re: float = 2.0, alpha: float = 2.0, beta: float = 0.01) -> Callable[
-    [np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+def elu_scaler(re: float = 2.0, alpha: float = 2.0,
+               beta: float = 0.01) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Build a scaling function with an exponential tail and a linear core.
 
     Shaped like an ELU: beyond ``re`` the scaled distance decays exponentially, as in
@@ -366,7 +366,7 @@ def elu_scaler(re: float = 2.0, alpha: float = 2.0, beta: float = 0.01) -> Calla
         beta: Weight of the long-range tail.
     """
 
-    def scaler(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def scaler(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         tail = alpha * (1.0 - x / re)
         decay = np.exp(tail)
         outer = x > re

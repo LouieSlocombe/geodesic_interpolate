@@ -1,6 +1,16 @@
-import os
+"""Regression tests for geodesic interpolation.
+
+The reference paths in `data` are converged optimisation results rather than analytic
+answers, so the file-based cases check that a fresh run lands back on them: bond lengths
+at the two fixed end points, and then every image's coordinates.
+
+Data is resolved relative to this file, and every output goes to a `tmp_path`, so the
+tests run from any working directory and leave nothing behind.
+"""
+from pathlib import Path
 
 import numpy as np
+import pytest
 from ase import Atoms
 from ase.build import molecule
 from ase.calculators.emt import EMT
@@ -8,298 +18,189 @@ from ase.io import read
 from ase.lattice.cubic import FaceCenteredCubic
 from ase.mep import NEB
 from ase.optimize.fire import FIRE as QuasiNewton
-from ase.visualize import view
 from scipy.spatial import KDTree
 
 import geodesic_interpolate as gi
 
+DATA = Path(__file__).parent / "data"
 
-def atoms_equal(atoms1, atoms2, tol=1e-2):
-    if len(atoms1) != len(atoms2):
-        print("non equal lengths:", len(atoms1), len(atoms2))
-        return False
-    if not np.all(atoms1.get_atomic_numbers() == atoms2.get_atomic_numbers()):
-        print("non equal atomic numbers:", atoms1.get_atomic_numbers(), atoms2.get_atomic_numbers())
-        return False
-    coords1 = atoms1.get_positions()
-    coords2 = atoms2.get_positions()
-    return np.allclose(coords1, coords2, atol=tol)
-
-
-def atoms_list_equal(list1, list2, tol=1e-1):
-    if len(list1) != len(list2):
-        print("Non-equal list lengths:", len(list1), len(list2))
-        return False
-    for i, (a1, a2) in enumerate(zip(list1, list2)):
-        if len(a1) != len(a2):
-            print(f"Non-equal atom counts at index {i}: {len(a1)} vs {len(a2)}")
-            return False
-        if not np.all(a1.get_atomic_numbers() == a2.get_atomic_numbers()):
-            print(f"Non-equal atomic numbers at index {i}: {a1.get_atomic_numbers()} vs {a2.get_atomic_numbers()}")
-            return False
-        if not np.allclose(a1.get_positions(), a2.get_positions(), atol=tol):
-            print(f"Non-equal coordinates at index {i}")
-            return False
-    return True
+# The three protein-scale systems dominate the runtime, so they are marked for deselection
+CASES = [
+    "H+CH4_CH3+H2",
+    "DielsAlder",
+    pytest.param("TrpCage_unfold", marks=pytest.mark.slow),
+    pytest.param("collagen", marks=pytest.mark.slow),
+    pytest.param("calcium_binding", marks=pytest.mark.slow),
+]
 
 
-def atoms_list_bond_lengths_equal(list1, list2, cutoff=2.0, tol=1e-4):
-    """Check if two lists of ASE Atoms objects have the same bond lengths."""
-    if len(list1) != len(list2):
-        print("Non-equal list lengths:", len(list1), len(list2))
-        return False
-    for i, (a1, a2) in enumerate(zip(list1, list2)):
-        pos1 = a1.get_positions()
-        pos2 = a2.get_positions()
-        tree1 = KDTree(pos1)
-        tree2 = KDTree(pos2)
-        pairs1 = np.array(sorted(tree1.query_pairs(cutoff)))
-        pairs2 = np.array(sorted(tree2.query_pairs(cutoff)))
-        if not np.array_equal(pairs1, pairs2):
-            print(f"Non-equal bond pairs at index {i}")
-            return False
-        bonds1 = np.linalg.norm(pos1[pairs1[:, 0]] - pos1[pairs1[:, 1]], axis=1)
-        bonds2 = np.linalg.norm(pos2[pairs2[:, 0]] - pos2[pairs2[:, 1]], axis=1)
-        if not np.allclose(bonds1, bonds2, atol=tol):
-            print(f"Non-equal bond lengths at index {i}")
-            return False
-    return True
+def assert_bond_lengths_equal(path, reference, cutoff=2.0, tol=1e-4):
+    """Assert two paths agree on which atoms are bonded and how long those bonds are.
+
+    Bond lengths survive the rigid-body motion that path alignment applies, so this holds
+    even when the two paths have been rotated into different orientations.
+    """
+    assert len(path) == len(reference), f"{len(path)} images against {len(reference)}"
+    for i, (image, ref) in enumerate(zip(path, reference, strict=True)):
+        pos, ref_pos = image.get_positions(), ref.get_positions()
+        pairs = np.array(sorted(KDTree(pos).query_pairs(cutoff)))
+        ref_pairs = np.array(sorted(KDTree(ref_pos).query_pairs(cutoff)))
+        assert np.array_equal(pairs, ref_pairs), f"different bonded pairs in image {i}"
+        bonds = np.linalg.norm(pos[pairs[:, 0]] - pos[pairs[:, 1]], axis=1)
+        ref_bonds = np.linalg.norm(ref_pos[ref_pairs[:, 0]] - ref_pos[ref_pairs[:, 1]], axis=1)
+        assert np.allclose(bonds, ref_bonds, atol=tol), (
+            f"bond lengths differ in image {i} by up to {np.abs(bonds - ref_bonds).max():.2e}"
+        )
 
 
-def test_case_ch():
-    print(flush=True)
-    in_file = "data/H+CH4_CH3+H2"
-    out_file = "interpolated"
-
-    gi.geodesic_interpolate(f"{in_file}.xyz")
-    atoms = read(f"{out_file}.xyz", index=':')
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
-
-    os.remove(f"{out_file}.xyz")
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
+def assert_paths_equal(path, reference, tol=1e-1):
+    """Assert two paths hold the same atoms in the same places."""
+    assert len(path) == len(reference), f"{len(path)} images against {len(reference)}"
+    for i, (image, ref) in enumerate(zip(path, reference, strict=True)):
+        assert image.get_chemical_symbols() == ref.get_chemical_symbols(), f"different atoms in image {i}"
+        deviation = np.abs(image.get_positions() - ref.get_positions()).max()
+        assert deviation < tol, f"image {i} is off the reference by {deviation:.3f} A"
 
 
-def test_case_ch_atoms():
-    print(flush=True)
-    in_file = "data/H+CH4_CH3+H2"
-    out_file = "interpolated"
-    atoms_in = read(f"{in_file}.xyz", index=':')
+@pytest.mark.parametrize("case", CASES)
+def test_interpolate_from_file(case, tmp_path):
+    """A filename in, an XYZ path out, matching the stored reference."""
+    output = tmp_path / "interpolated.xyz"
+    gi.geodesic_interpolate(DATA / f"{case}.xyz", output=output)
 
-    atoms = gi.geodesic_interpolate(atoms_in)
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
-
-
-def test_case_diels_alder():
-    print(flush=True)
-    in_file = "data/DielsAlder"
-    out_file = "interpolated"
-
-    gi.geodesic_interpolate(f"{in_file}.xyz")
-    atoms = read(f"{out_file}.xyz", index=':')
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
-
-    os.remove(f"{out_file}.xyz")
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
+    path = read(output, index=':')
+    reference = read(DATA / f"{case}_interpolated.xyz", index=':')
+    assert_bond_lengths_equal([path[0], path[-1]], [reference[0], reference[-1]])
+    assert_paths_equal(path, reference)
 
 
-# @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
-def test_case_trp_cage_unfold():
-    print(flush=True)
-    in_file = "data/TrpCage_unfold"
-    out_file = "interpolated"
+def test_interpolate_from_atoms():
+    """ASE Atoms in, ASE Atoms out, with no file involved on either side."""
+    end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
 
-    gi.geodesic_interpolate(f"{in_file}.xyz")
-    atoms = read(f"{out_file}.xyz", index=':')
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    path = gi.geodesic_interpolate(end_points)
 
-    os.remove(f"{out_file}.xyz")
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
+    assert all(isinstance(image, Atoms) for image in path)
+    reference = read(DATA / "H+CH4_CH3+H2_interpolated.xyz", index=':')
+    assert_bond_lengths_equal([path[0], path[-1]], [reference[0], reference[-1]])
+    assert_paths_equal(path, reference)
 
 
-# @pytest.mark.skip  # Fails, Non-equal coordinates at index 1
-def test_case_collagen():
-    print(flush=True)
-    in_file = "data/collagen"
-    out_file = "interpolated"
+def test_interpolation_is_reproducible(tmp_path):
+    """The bisection is stochastic, so `seed` is what makes a run repeatable."""
+    first, second = tmp_path / "first.xyz", tmp_path / "second.xyz"
 
-    gi.geodesic_interpolate(f"{in_file}.xyz")
-    atoms = read(f"{out_file}.xyz", index=':')
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    gi.geodesic_interpolate(DATA / "H+CH4_CH3+H2.xyz", output=first)
+    gi.geodesic_interpolate(DATA / "H+CH4_CH3+H2.xyz", output=second)
 
-    os.remove(f"{out_file}.xyz")
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
+    assert first.read_text() == second.read_text()
 
 
-def test_case_calcium_binding():
-    print(flush=True)
-    in_file = "data/calcium_binding"
-    out_file = "interpolated"
+def test_xyz_round_trip(tmp_path):
+    """Coordinates written to an XYZ file come back unchanged."""
+    atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
+    output = tmp_path / "round_trip.xyz"
 
-    gi.geodesic_interpolate(f"{in_file}.xyz")
-    atoms = read(f"{out_file}.xyz", index=':')
-    atoms_ref = read(f"{in_file}_{out_file}.xyz", index=':')
+    gi.write_xyz(output, atom_names, coords)
+    names_back, coords_back = gi.read_xyz(output)
 
-    os.remove(f"{out_file}.xyz")
-
-    assert atoms_list_bond_lengths_equal([atoms[0], atoms[-1]], [atoms_ref[0], atoms_ref[-1]])
-    assert atoms_list_equal(atoms, atoms_ref)
+    assert names_back == atom_names
+    assert np.allclose(coords_back, coords)
 
 
-def test_xyz_interconversion():
-    print(flush=True)
-    in_file = "data/H+CH4_CH3+H2"
-    atom_names, coords = gi.read_xyz(f"{in_file}.xyz")
-    print(atom_names)
-    print(coords)
-    gi.write_xyz('test.xyz', atom_names, coords)
+def test_ase_round_trip():
+    """Coordinates converted to ASE Atoms and back come back unchanged."""
+    atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
+
+    images = gi.to_ase_atoms(atom_names, coords)
+    names_back, coords_back = gi.from_ase_atoms(images)
+
+    assert len(images) == len(coords)
+    assert names_back == atom_names
+    assert np.allclose(coords_back, coords)
 
 
-def test_atoms_interconversion():
-    print(flush=True)
-    in_file = "data/H+CH4_CH3+H2"
-    atoms = read(f"{in_file}.xyz", index=':')
-    print(atoms)
-    for atom in atoms:
-        print(atom.get_chemical_symbols())
-        print(atom.get_positions())
-    atom_names, coords = gi.from_ase_atoms(atoms)
-    print(atom_names)
-    print(coords)
+def test_read_xyz_rejects_truncated_file(tmp_path):
+    """A frame that ends early is a format error, not a silently short geometry."""
+    truncated = tmp_path / "truncated.xyz"
+    truncated.write_text("3\ncomment\n C 0.0 0.0 0.0\n")  # Claims three atoms, holds one
 
-    atom_names, coords = gi.read_xyz(f"{in_file}.xyz")
-    print(atom_names)
-    print(coords)
-
-    atoms = gi.to_ase_atoms(atom_names, coords)
-
-    print(atoms)
-    for atom in atoms:
-        print(atom.get_chemical_symbols())
-        print(atom.get_positions())
+    with pytest.raises(ValueError, match="Incorrect XYZ file format"):
+        gi.read_xyz(truncated)
 
 
-def test_ase_compare():
-    # Set the number of images you want.
-    nimages = 15
+def test_read_xyz_rejects_empty_file(tmp_path):
+    empty = tmp_path / "empty.xyz"
+    empty.write_text("")
 
-    # Some algebra to determine surface normal and the plane of the surface.
+    with pytest.raises(ValueError, match="File is empty"):
+        gi.read_xyz(empty)
+
+
+# The interpolated path is handed to ASE as bare Atoms objects, so the cell and boundary
+# conditions of the input do not survive the round trip and these NEBs run as clusters.
+# Both are smoke tests: they check the path ASE is given, then that ASE can relax it.
+
+@pytest.mark.slow
+def test_neb_on_slab_adatom():
+    """Interpolate an adatom hopping across a Pt step, then relax the path with NEB."""
+    n_images = 15
+
+    # Algebra determining the surface normal and the plane of the surface
     d3 = [2, 1, 1]
-    a1 = np.array([0, 1, 1])
-    d1 = np.cross(a1, d3)
-    a2 = np.array([0, -1, 1])
-    d2 = np.cross(a2, d3)
+    d1 = np.cross(np.array([0, 1, 1]), d3)
+    d2 = np.cross(np.array([0, -1, 1]), d3)
+    slab = FaceCenteredCubic(directions=[d1, d2, d3], size=(2, 1, 2), symbol='Pt', latticeconstant=3.9)
 
-    # Create the slab.
-    slab = FaceCenteredCubic(
-        directions=[d1, d2, d3], size=(2, 1, 2), symbol='Pt', latticeconstant=3.9
-    )
+    cell = slab.get_cell()
+    cell[2] += [0.0, 0.0, 10.0]  # Ten layers of vacuum above the slab
+    slab.set_cell(cell, scale_atoms=False)
 
-    # Add some vacuum to the slab.
-    uc = slab.get_cell()
-    uc[2] += [0.0, 0.0, 10.0]  # There are ten layers of vacuum.
-    uc = slab.set_cell(uc, scale_atoms=False)
+    # Positions placing the adatom below, and then above, the step
+    x1, x2, x3 = 1.379, 4.137, 2.759
+    y1, y2 = 0.0, 2.238
+    z1, z2 = 7.165, 6.439
 
-    # Some positions needed to place the atom in the correct place.
-    x1 = 1.379
-    x2 = 4.137
-    x3 = 2.759
-    y1 = 0.0
-    y2 = 2.238
-    z1 = 7.165
-    z2 = 6.439
-
-    # Add the adatom to the list of atoms and set constraints of surface atoms.
     slab += Atoms('N', [((x2 + x1) / 2, y1, z1 + 1.5)])
-    # mask = [atom.symbol == 'Pt' for atom in slab]
-    # slab.set_constraint(FixAtoms(mask=mask))
-
-    # Optimise the initial state: atom below step.
     initial = slab.copy()
     initial.calc = EMT()
-    relax = QuasiNewton(initial)
-    relax.run(fmax=0.05)
+    QuasiNewton(initial).run(fmax=0.05)
 
-    # Optimise the final state: atom above step.
     slab[-1].position = (x3, y2 + 1.0, z2 + 3.5)
     final = slab.copy()
     final.calc = EMT()
-    relax = QuasiNewton(final)
-    relax.run(fmax=0.05)
+    QuasiNewton(final).run(fmax=0.05)
 
-    # Create a list of images for interpolation.
-    images = [initial]
-    for i in range(nimages - 2):
-        images.append(initial.copy())
+    images = gi.geodesic_interpolate([initial, final], n_images=n_images)
+
+    assert len(images) == n_images
+    assert images[0].get_chemical_symbols() == initial.get_chemical_symbols()
+    assert all(np.isfinite(image.get_positions()).all() for image in images)
 
     for image in images:
         image.calc = EMT()
-
-    images.append(final)
-
-    images = gi.geodesic_interpolate([images[0], images[-1]], n_images=nimages)  # 155
-    for image in images:
-        image.calc = EMT()
-    #
-    # view(images)
-
-    # Carry out idpp interpolation.
-    neb = NEB(images)
-    # neb.interpolate('idpp')  # 176
-    # neb.idpp_interpolate() #54
-    # neb.interpolate() # 23 173
-
-    # Run NEB calculation.
-    qn = QuasiNewton(neb)
-    qn.run(fmax=0.05)
+    QuasiNewton(NEB(images)).run(fmax=0.05)
 
 
-def test_ase_ethane():
-    nimages = 15
+@pytest.mark.slow
+def test_neb_on_ethane_rotation():
+    """Interpolate a methyl rotation in ethane, then relax the path with NEB."""
+    n_images = 15
 
-    # Optimise molecule.
     initial = molecule('C2H6')
     initial.calc = EMT()
-    relax = QuasiNewton(initial)
-    relax.run(fmax=0.05)
+    QuasiNewton(initial).run(fmax=0.05)
 
-    # Create final state.
+    # Permute three hydrogens to rotate one methyl group onto itself
     final = initial.copy()
     final.positions[2:5] = initial.positions[[3, 4, 2]]
 
-    # Generate blank images.
-    images = [initial]
+    images = gi.geodesic_interpolate([initial, final], n_images=n_images)
 
-    for i in range(nimages - 2):
-        images.append(initial.copy())
+    assert len(images) == n_images
+    assert images[0].get_chemical_symbols() == initial.get_chemical_symbols()
+    assert all(np.isfinite(image.get_positions()).all() for image in images)
 
     for image in images:
         image.calc = EMT()
-
-    images.append(final)
-
-    images = gi.geodesic_interpolate([images[0], images[-1]], n_images=nimages)  # 1
-    for image in images:
-        image.calc = EMT()
-
-    # Run linear interpolation.
-    neb = NEB(images)  # 66
-    # neb.interpolate() # 46
-    # neb.idpp_interpolate() # 7
-    # neb.interpolate('idpp') # 7
-
-    # Run NEB calculation.
-    qn = QuasiNewton(neb)
-    qn.run(fmax=0.05)
-
-    view(neb.images)
+    QuasiNewton(NEB(images)).run(fmax=0.05)

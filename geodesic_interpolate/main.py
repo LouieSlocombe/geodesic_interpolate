@@ -3,15 +3,16 @@ import logging
 import os
 
 import numpy as np
+from ase import Atoms
 
-from .fileio import from_ase_atoms, to_ase_atoms, read_xyz, write_xyz
+from .fileio import from_ase_atoms, read_xyz, to_ase_atoms, write_xyz
 from .geodesic import Geodesic
 from .interpolation import redistribute
 
 logger = logging.getLogger(__name__)
 
 
-def _configure_logging(logging_level) -> None:
+def _configure_logging(logging_level: int | str) -> None:
     """Set the reporting level for this package without touching anyone else's logging.
 
     `logging.basicConfig` would reconfigure the root logger of whatever application
@@ -31,18 +32,18 @@ def _configure_logging(logging_level) -> None:
 
 
 def geodesic_interpolate(
-        atoms,
-        n_images=17,
-        output="interpolated.xyz",
-        tol=2e-3,
-        max_iter=50,
-        micro_iter=20,
-        scaling=1.7,
-        friction=1e-2,
-        dist_cutoff=3.0,
-        logging_level="INFO",
-        seed=42,
-):
+        atoms: list[Atoms] | str | os.PathLike,
+        n_images: int = 17,
+        output: str | os.PathLike = "interpolated.xyz",
+        tol: float = 2e-3,
+        max_iter: int = 50,
+        micro_iter: int = 20,
+        scaling: float = 1.7,
+        friction: float = 1e-2,
+        dist_cutoff: float = 3.0,
+        logging_level: int | str = "INFO",
+        seed: int = 42,
+) -> list[Atoms] | None:
     """Interpolate a reaction path between two or more geometries.
 
     Runs the two stages in turn: `redistribute` builds a raw path with the requested
@@ -70,8 +71,8 @@ def geodesic_interpolate(
         logging_level: Logging level for the progress output.
         seed: Seed for the random nudges and image sampling, so runs reproduce.  The
             bisection is stochastic, and without a fixed seed larger systems will not
-            give the same path twice.  The seed is kept to a private random stream, so
-            the caller's own use of `numpy.random` is left alone.
+            give the same path twice.  The seed goes to a `numpy.random.Generator` used
+            only here, so the caller's own random state is left alone.
 
     Returns:
         The interpolated path as a list of ASE Atoms objects when `atoms` was a list of
@@ -81,7 +82,7 @@ def geodesic_interpolate(
         TypeError: If `atoms` is neither a list of ASE Atoms nor a filename.
         ValueError: If fewer than two geometries are supplied.
     """
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     _configure_logging(logging_level)
     if isinstance(atoms, (str, os.PathLike)):
         symbols, geometries = read_xyz(atoms)

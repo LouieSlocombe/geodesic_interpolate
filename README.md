@@ -16,11 +16,15 @@ This had been modified from the original code to work with ASE.
 
 Test Examples
 ----
-These live in `tests/data`, next to the reference paths the suite compares against.  The
-tests resolve their data paths relative to the working directory, so run them from inside
-the `tests` directory:
+These live in `tests/data`, next to the reference paths the suite compares against.  Run the
+tests from anywhere in the repository with
 
-    cd tests && pytest
+    pytest
+
+The three protein-scale cases below dominate the runtime and are marked `slow`, so for a
+quick check run
+
+    pytest -m "not slow"
 
 - `H+CH4_CH3+H2.xyz` A simple test case.  Should always work.
 - `DielsAlder.xyz`   Dehydro-Diels-Alder reaction.  This is an important test case because the initial structure is planar symmetric and
@@ -86,7 +90,7 @@ Arguments:
   * `n_images` Number of images in the interpolated path. (default: 17)
   * `output` Output filename. Only used when `atoms` is a filename. (default: interpolated.xyz)
   * `tol` Convergence tolerance for the smoothing. (default: 0.002)
-  * `max_iter` Maximum number of minimization iterations, or sweeps when sweeping. (default: 15)
+  * `max_iter` Maximum number of minimization iterations, or sweeps when sweeping. (default: 50)
   * `micro_iter` Maximum number of micro iterations per image, used only when sweeping. (default: 20)
   * `scaling` Exponential parameter for the morse potential setting the coordinate metric. (default: 1.7)
   * `friction` Size of the friction term used to prevent very large changes of geometry. (default: 0.01)
@@ -99,8 +103,10 @@ chosen automatically for systems of more than 35 atoms, where the whole-path opt
 becomes slow.  It is not selectable by hand.
 
 The bisection step adds random nudges to its starting geometries, so results are only
-reproducible because `seed` is fixed.  Changing it, for a large system especially, will
-give a different path; running a few seeds and keeping the shortest is worthwhile.
+reproducible because `seed` is fixed.  It seeds a `numpy.random.Generator` used only inside
+the interpolation, leaving your own random state alone.  Changing it, for a large system
+especially, will give a different path; running a few seeds and keeping the shortest is
+worthwhile.
 
 Helpers for moving between XYZ files and ASE objects are re-exported at the top level:
 `read_xyz`, `write_xyz`, `from_ase_atoms` and `to_ase_atoms`.
