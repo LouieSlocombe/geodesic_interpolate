@@ -95,7 +95,7 @@ def align_path_to(ref_geom: np.ndarray, path: np.ndarray) -> np.ndarray:
     """Move a whole path rigidly so that its first image sits on a reference geometry.
 
     `align_path` leaves the path centred on the origin and rotated onto its own first
-    image, which is a frame of the optimizer's choosing rather than the one the caller
+    image, which is a frame of the optimiser's choosing rather than the one the caller
     handed in.  That is immaterial for an isolated molecule, but a unit cell only
     describes where the atoms are in the frame it came with, so a periodic path has to be
     put back before its cell means anything.
@@ -329,14 +329,16 @@ def compute_wij(geom: np.ndarray,
         func: Scaling function returning both the scaled value and its derivative
             with respect to the raw distance.  Must broadcast over arrays.
         sparse: Return the B matrix as a sparse matrix rather than a dense array.  Only
-            six of its entries per row are ever non-zero, so this is what the optimizers
+            six of its entries per row are ever non-zero, so this is what the optimisers
             are given: it saves building the dense array, and lets scipy solve the
             least-squares steps iteratively instead of by dense factorisation.
 
     Returns:
         wij: The scaled distance for each pair.
-        b_mat: Cartesian gradients of the scaled distances, with the atom and
-            component axes flattened together so scipy.optimize can use it directly.
+        b_mat: Cartesian gradients of the scaled distances, of shape
+            ``(n_pairs, 3 * n_atoms)``, with the atom and component axes flattened
+            together so scipy.optimize can use it directly.  A dense array by default,
+            or a `scipy.sparse.csr_matrix` when ``sparse`` is set.
     """
     geom = np.asarray(geom, dtype=float).reshape(-1, 3)
     if not sparse:
@@ -363,10 +365,9 @@ def morse_scaler(re: float = 1.5, alpha: float = 1.7,
                  beta: float = 0.01) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Build a scaling function based on a Morse potential.
 
-    The returned function takes an inter-nuclear distance and gives back the scaled
-    distance along with its derivative with respect to the unscaled one.  A small
-    ``beta / r`` tail is added so that the coordinate keeps responding to atoms that
-    are far apart, where the exponential has already decayed away.
+    This is the metric geodesic interpolation uses by default.  A small ``beta / r``
+    tail is added so that the coordinate keeps responding to atoms that are far apart,
+    where the exponential has already decayed away.
 
     Args:
         re: Equilibrium distance.  Usually the per-pair array returned by
@@ -375,9 +376,14 @@ def morse_scaler(re: float = 1.5, alpha: float = 1.7,
             which tracks a sharp energy landscape better, while smaller values have
             longer range and give smoother paths from few images.
         beta: Weight of the long-range tail.
+
+    Returns:
+        A function taking an array of distances to the scaled distances and their
+        derivatives with respect to the raw distance, in the form `compute_wij` expects.
     """
 
     def scaler(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Scale an array of distances, and differentiate the scaling."""
         ratio = x / re
         val1 = np.exp(alpha * (1.0 - ratio))
         val2 = beta / ratio
@@ -396,16 +402,18 @@ def elu_scaler(re: float = 2.0, alpha: float = 2.0,
     ``re`` instead of blowing up.  A ``beta * re / r`` tail is added for the same
     reason as in the Morse case.
 
-    The returned function takes an inter-nuclear distance and gives back the scaled
-    distance along with its derivative with respect to the unscaled one.
-
     Args:
         re: Distance at which the behaviour switches from linear to exponential.
         alpha: Decay constant of the exponential, which also sets the linear slope.
         beta: Weight of the long-range tail.
+
+    Returns:
+        A function taking an array of distances to the scaled distances and their
+        derivatives with respect to the raw distance, in the form `compute_wij` expects.
     """
 
     def scaler(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Scale an array of distances, and differentiate the scaling."""
         tail = alpha * (1.0 - x / re)
         decay = np.exp(tail)
         outer = x > re

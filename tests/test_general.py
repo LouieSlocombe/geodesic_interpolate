@@ -40,6 +40,11 @@ def assert_bond_lengths_equal(path, reference, cutoff=2.0, tol=1e-4):
 
     Bond lengths survive the rigid-body motion that path alignment applies, so this holds
     even when the two paths have been rotated into different orientations.
+
+    Args:
+        path, reference: The two paths to compare, as lists of ASE Atoms.
+        cutoff: Distance below which two atoms count as bonded.
+        tol: Largest bond length difference to accept, in Angstrom.
     """
     assert len(path) == len(reference), f"{len(path)} images against {len(reference)}"
     for i, (image, ref) in enumerate(zip(path, reference, strict=True)):
@@ -55,7 +60,12 @@ def assert_bond_lengths_equal(path, reference, cutoff=2.0, tol=1e-4):
 
 
 def assert_paths_equal(path, reference, tol=1e-1):
-    """Assert two paths hold the same atoms in the same places."""
+    """Assert two paths hold the same atoms in the same places.
+
+    Args:
+        path, reference: The two paths to compare, as lists of ASE Atoms.
+        tol: Largest coordinate deviation to accept, in Angstrom.
+    """
     assert len(path) == len(reference), f"{len(path)} images against {len(reference)}"
     for i, (image, ref) in enumerate(zip(path, reference, strict=True)):
         assert image.get_chemical_symbols() == ref.get_chemical_symbols(), f"different atoms in image {i}"
@@ -131,6 +141,7 @@ def test_read_xyz_rejects_truncated_file(tmp_path):
 
 
 def test_read_xyz_rejects_empty_file(tmp_path):
+    """A file with no frames in it is an error rather than an empty path."""
     empty = tmp_path / "empty.xyz"
     empty.write_text("")
 

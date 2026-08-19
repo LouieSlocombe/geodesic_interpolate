@@ -1,4 +1,9 @@
-"""Top-level driver tying the interpolation and smoothing stages together."""
+"""Top-level driver tying the interpolation and smoothing stages together.
+
+`geodesic_interpolate` is the one function most callers need.  It takes the end points,
+builds a raw path with `interpolation.redistribute`, smooths it with `geodesic.Geodesic`,
+and hands the result back in whichever form the end points came in.
+"""
 import os
 
 import numpy as np
@@ -28,13 +33,18 @@ def geodesic_interpolate(
     number of images, then `Geodesic` smooths it into a geodesic under the internal
     coordinate metric.
 
+    Which smoothing is used depends on the size of the system.  Up to 35 atoms the whole
+    path is optimised at once; beyond that the images are smoothed one at a time,
+    sweeping back and forth along the path, because scipy's optimisers slow down badly
+    as the problem grows.
+
     Input and output mirror each other.  Given ASE Atoms objects the interpolated path
     comes back as Atoms objects; given a filename it is written to `output` instead.
 
     Given Atoms objects, everything the interpolation does not itself touch is taken from
     the first frame and carried onto every image: the unit cell, the boundary conditions,
     constraints, tags and so on.  A periodic path is also moved back onto the frame of
-    reference of the input, since the optimization otherwise leaves it centred and rotated
+    reference of the input, since the optimisation otherwise leaves it centred and rotated
     into a frame of its own, which would put the atoms in the wrong place relative to the
     cell.  Note that the interpolation itself is not periodic: the internal coordinates
     are plain inter-atomic distances with no minimum image convention, so a bond that
@@ -46,15 +56,21 @@ def geodesic_interpolate(
             but intermediate ones are used if present.
         n_images: Number of images in the interpolated path.
         output: XYZ file to write to.  Only used when `atoms` is a filename.
-        tol: Convergence tolerance for the smoothing.
-        max_iter: Maximum number of iterations, or sweeps in the sweeping case.  This is
-            a ceiling rather than a target: the optimization stops as soon as it meets
-            `tol`, which the test systems do in 13 to 25 iterations.  Setting it too low
+        tol: Convergence tolerance for the smoothing, judged on the uniform gradient of
+            the path length.  The raw path is built at five times this, being only a
+            starting guess for the smoothing.
+        max_iter: Ceiling on the smoothing, counting function evaluations when the whole
+            path is optimised at once and sweeps when sweeping.  It is a ceiling rather
+            than a target, as the optimisation stops as soon as it meets `tol`: the
+            bundled test systems all converge somewhere between 10 and 35 at the default
+            seed, though the count moves around with the seed.  Setting it too low
             silently truncates the path part-way through the descent.
-        micro_iter: Micro-iterations per image, used only when sweeping.
+        micro_iter: Micro-iterations spent on each image.  Only used when sweeping, so
+            it has no effect on systems of 35 atoms or fewer.
         scaling: Alpha parameter of the Morse scaler setting the coordinate metric.
-        friction: Weight of the friction term regularising the optimization step size.
-        dist_cutoff: Distance cut-off for building the internal coordinates.
+        friction: Weight of the friction term regularising the optimisation step size.
+        dist_cutoff: Distance cut-off for building the internal coordinates.  Atoms
+            within three bonds of each other are included whatever their distance.
         seed: Seed for the random nudges and image sampling, so runs reproduce.  The
             bisection is stochastic, and without a fixed seed larger systems will not
             give the same path twice.  The seed goes to a `numpy.random.Generator` used
@@ -88,7 +104,7 @@ def geodesic_interpolate(
     raw = redistribute(symbols, geometries, n_images, tol=tol * 5, rng=rng)
     smoother = Geodesic(symbols, raw, scaling, threshold=dist_cutoff, friction=friction, rng=rng)
 
-    # Optimizing the whole path at once is faster, but scipy's optimizers slow down
+    # Optimising the whole path at once is faster, but scipy's optimisers slow down
     # badly as the system grows, so past this size sweep one image at a time instead
     sweep = len(symbols) > 35
 
@@ -101,7 +117,7 @@ def geodesic_interpolate(
         write_xyz(output, symbols, smoother.path)
         return None
 
-    # The optimization leaves the path in its own centred and rotated frame.  That is of
+    # The optimisation leaves the path in its own centred and rotated frame.  That is of
     # no consequence for an isolated molecule, but a cell describes where the atoms are
     # only in the frame it was given in, so a periodic path is moved back onto its input
     path = smoother.path

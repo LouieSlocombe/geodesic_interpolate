@@ -1,8 +1,9 @@
-"""Simplified geodesic interpolation module.
+"""Raw path construction, the first of the two interpolation stages.
 
-Uses geodesic lengths as the criterion for adding bisection points until the image
-count matches what was asked for.  The result is only a starting guess: a following
-round of geodesic smoothing is needed to get the final path.
+Adds or drops images until the count matches what was asked for, bisecting the largest
+gap each time and using geodesic length to choose between candidate midpoints.  The
+result is only a starting guess: the geodesic smoothing in `geodesic` is what turns it
+into the final path.
 """
 import numpy as np
 from scipy.optimize import least_squares
@@ -73,6 +74,7 @@ def _mid_point(atoms: list[str],
         last_eval: list = [None, None]
 
         def wij_at(x: np.ndarray):
+            """Scaled distances and B matrix at `x`, reusing the last result if it fits."""
             if last_eval[0] is None or not np.array_equal(last_eval[0], x):
                 last_eval[0] = np.array(x)
                 last_eval[1] = compute_wij(x, rij_list, scaler, sparse=True)

@@ -15,11 +15,25 @@ from .coord_utils import align_path, compute_wij, get_bond_list, morse_scaler
 
 
 class Geodesic:
-    """Optimizer that finds a geodesic in redundant internal coordinates.
+    """Optimiser that finds a geodesic in redundant internal coordinates.
 
     The heart of it is the path length in the internal metric: the length of each
     segment is measured through its midpoint, so that the target function is a sum of
-    squared displacements and can be handed straight to a least-squares optimizer.
+    squared displacements and can be handed straight to a least-squares optimiser.
+
+    `smooth` optimises every image at once and `sweep` takes them one at a time; both
+    leave the result in `path`.  The two end points are held fixed either way.
+
+    Attributes:
+        path: The current geometries, of shape ``(n_images, n_atoms, 3)``.  Updated in
+            place as the optimisation proceeds.
+        rij_list: The atom pairs making up the internal coordinates.
+        re: Equilibrium distance for each of those pairs.
+        length: Path length in the internal metric, over the section last measured.
+            Only set once the displacements have been computed.
+        optimality: Infinity norm of the gradient of the length, which is what
+            convergence is judged on.  Only set once the target function has been
+            evaluated.
     """
 
     def __init__(self,
@@ -45,7 +59,7 @@ class Geodesic:
             min_neighbors: Minimum number of neighbours each atom must have in the
                 atom pair list.
             friction: Weight of the friction term in the target function, which keeps
-                the optimizer from taking steps large enough to blow the path up.
+                the optimiser from taking steps large enough to blow the path up.
             rng: Random source used when sampling images to build the coordinates.
                 Defaults to a fresh unseeded `numpy.random.Generator`.
 
@@ -126,7 +140,7 @@ class Geodesic:
 
         Each segment is split at its midpoint and measured in two halves, which is what
         makes the length a sum of squares.  The friction term is appended to the same
-        vector so the least-squares optimizer sees it as extra residuals.
+        vector so the least-squares optimiser sees it as extra residuals.
 
         Args:
             start, end: Section of the path to measure.  A negative ``end`` counts back
@@ -210,8 +224,7 @@ class Geodesic:
                 no pull at all.
             friction: Weight of the friction term.
 
-        Sets `self.optimality`, the infinity norm of the gradient of the length, which
-        is what convergence is judged on.
+        Sets `self.displacements`, `self.grad` and `self.optimality`.
         """
         if end < 0:
             end += self.n_images
@@ -225,21 +238,36 @@ class Geodesic:
         self.optimality = np.abs(self.grad.T @ self.displacements).max()
 
     def target_func(self, X: np.ndarray, **kwargs) -> np.ndarray:
-        """Residuals for the optimizer.
+        """Residuals for the optimiser.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved
         since the last call.
+
+        Args:
+            X: Geometry of the segment, flattened as scipy hands it over.
+            **kwargs: Passed straight through to `compute_target_func`.
+
+        Returns:
+            The displacement vectors of the segment, with the friction residuals
+            appended.
         """
         self.compute_target_func(X, **kwargs)
         return self.displacements
 
     def target_deriv(self, X: np.ndarray, **kwargs) -> csr_matrix:
-        """Jacobian for the optimizer.
+        """Jacobian for the optimiser.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved
         since the last call.  Paired with `target_func`, this means each geometry is
         only ever evaluated once even though scipy asks for value and Jacobian
         separately.
+
+        Args:
+            X: Geometry of the segment, flattened as scipy hands it over.
+            **kwargs: Passed straight through to `compute_target_func`.
+
+        Returns:
+            The derivatives of those displacement vectors, held sparse.
         """
         self.compute_target_func(X, **kwargs)
         return self.grad
@@ -259,7 +287,8 @@ class Geodesic:
         Args:
             tol: Convergence tolerance on the optimality, i.e. the uniform gradient of
                 the target function.
-            max_iter: Maximum number of iterations to run.
+            max_iter: Ceiling on the number of function evaluations, passed to scipy as
+                ``max_nfev``.
             start, end: Section of the path to optimise.
             friction: Weight of the friction term.  Defaults to the value given to the
                 constructor.
@@ -267,7 +296,7 @@ class Geodesic:
                 geometry of the segment.
 
         Returns:
-            The optimized path.  This is also stored in `self.path`.
+            The optimised path.  This is also stored in `self.path`.
         """
 
         X0 = np.array(self.path[start:end]).ravel()
@@ -292,7 +321,7 @@ class Geodesic:
         """Minimise the path length one image at a time, sweeping back and forth.
 
         Less efficient per iteration than `smooth`, but it scales far more kindly with
-        system size given how slow scipy's optimizers get on large problems.  It also
+        system size given how slow scipy's optimisers get on large problems.  It also
         allows finer control, and makes it cheap to skip images that are already close
         to optimal.
 
@@ -300,11 +329,11 @@ class Geodesic:
             tol: Convergence tolerance on the optimality, i.e. the uniform gradient of
                 the target function.
             max_iter: Maximum number of sweeps through the path.
-            micro_iter: Number of micro-iterations spent optimizing each image.
+            micro_iter: Number of micro-iterations spent optimising each image.
             start, end: Section of the path to optimise.
 
         Returns:
-            The optimized path.  This is also stored in `self.path`.
+            The optimised path.  This is also stored in `self.path`.
         """
         if end < 0:
             end = self.n_images + end
@@ -313,7 +342,7 @@ class Geodesic:
         curr_tol = tol * 10
         for iteration in range(max_iter):
             max_dL = 0
-            for i in images:  # Use self.smooth() to optimize individual images
+            for i in images:  # Use self.smooth() to optimise individual images
                 # Each image is pulled back towards the midpoint of its neighbours,
                 # with heavy friction on the first sweep to keep the initial guess
                 # from being thrown around

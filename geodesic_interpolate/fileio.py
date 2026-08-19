@@ -1,4 +1,10 @@
-"""File IO utilities, and conversion to and from ASE Atoms objects."""
+"""File IO utilities, and conversion to and from ASE Atoms objects.
+
+Paths are read from and written to multi-frame XYZ files, or handed over as lists of
+ASE Atoms objects instead.  `to_ase_atoms` takes a template so that everything the
+interpolation does not itself touch — the unit cell, boundary conditions, constraints,
+tags — survives the round trip.
+"""
 import os
 
 import numpy as np

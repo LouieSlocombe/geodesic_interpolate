@@ -1,8 +1,9 @@
 """Geodesic interpolation for reaction paths.
 
-Builds a smooth initial guess for a reaction path between two geometries by finding
-the shortest path under a metric of scaled inter-atomic distances.  `geodesic_interpolate`
-is the entry point; the XYZ and ASE helpers are re-exported for convenience.
+Builds a smooth initial guess for a reaction path between two or more geometries by
+finding the shortest path under a metric of scaled inter-atomic distances.
+`geodesic_interpolate` is the entry point; the XYZ and ASE helpers are re-exported for
+convenience.
 """
 from importlib.metadata import PackageNotFoundError, version
 
