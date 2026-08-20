@@ -6,6 +6,7 @@ the feasibility problems that come with redundant internals, where an arbitrary 
 internal coordinate values need not correspond to any real geometry.
 """
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -36,14 +37,17 @@ class Geodesic:
             evaluated.
     """
 
+    length: float
+    optimality: float
+
     def __init__(self,
                  atoms: list[str],
-                 path: np.ndarray,
-                 scaler: float | Callable = 1.7,
+                 path: np.ndarray | list[np.ndarray],
+                 scaler: float | Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]] = 1.7,
                  threshold: float = 3.0,
                  min_neighbors: int = 4,
                  friction: float = 1e-3,
-                 rng: np.random.Generator | None = None):
+                 rng: np.random.Generator | None = None) -> None:
         """Initialise the interpolater.
 
         Args:
@@ -82,11 +86,13 @@ class Geodesic:
         self.friction = friction
         # Initalize interal storages for mid points, internal coordinates and B matrices.
         # `None` marks a value as unknown, so it is only ever computed when needed.
-        self.w = [None] * self.n_images
-        self.dw_dR = [None] * self.n_images
-        self.w_mid = [None] * (self.n_images - 1)
-        self.dwdR_mid = [None] * (self.n_images - 1)
-        self.displacements = self.grad = self.segment = None
+        self.w: list[np.ndarray | None] = [None] * self.n_images
+        self.dw_dR: list[csr_matrix | None] = [None] * self.n_images
+        self.w_mid: list[np.ndarray | None] = [None] * (self.n_images - 1)
+        self.dwdR_mid: list[csr_matrix | None] = [None] * (self.n_images - 1)
+        self.displacements: np.ndarray | None = None
+        self.grad: csr_matrix | None = None
+        self.segment: tuple[int, int] | None = None
 
     def update_intc(self) -> None:
         """Fill in any internal coordinates and derivatives currently marked unknown.
@@ -237,7 +243,7 @@ class Geodesic:
         self.compute_disp_grad(start, end, friction=friction)
         self.optimality = np.abs(self.grad.T @ self.displacements).max()
 
-    def target_func(self, X: np.ndarray, **kwargs) -> np.ndarray:
+    def target_func(self, X: np.ndarray, **kwargs: Any) -> np.ndarray:
         """Residuals for the optimiser.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved
@@ -254,7 +260,7 @@ class Geodesic:
         self.compute_target_func(X, **kwargs)
         return self.displacements
 
-    def target_deriv(self, X: np.ndarray, **kwargs) -> csr_matrix:
+    def target_deriv(self, X: np.ndarray, **kwargs: Any) -> csr_matrix:
         """Jacobian for the optimiser.
 
         Wraps `compute_target_func`, which skips the work if the geometry has not moved

@@ -7,7 +7,7 @@ into the final path.
 """
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.sparse import identity, vstack
+from scipy.sparse import csr_matrix, identity, vstack
 
 from .coord_utils import align_geom, align_path, compute_wij, get_bond_list, morse_scaler
 from .geodesic import Geodesic
@@ -50,7 +50,7 @@ def _mid_point(atoms: list[str],
     geom1, geom2 = np.array(geom1, dtype=float), np.array(geom2, dtype=float)
     if rng is None:
         rng = np.random.default_rng()
-    add_pair: set = set()
+    add_pair: set[tuple[int, int]] = set()
     geom_list: list[np.ndarray] = [geom1, geom2]
 
     # The outer loop makes sure the coordinate system is large enough.  The interpolated
@@ -71,9 +71,9 @@ def _mid_point(atoms: list[str],
         friction_block = identity(geom1.size, format='csr') * friction
         # scipy asks for the residuals and the Jacobian in separate calls but at the same
         # geometry, so holding on to the last evaluation halves the work
-        last_eval: list = [None, None]
+        last_eval: list[np.ndarray | tuple[np.ndarray, csr_matrix] | None] = [None, None]
 
-        def wij_at(x: np.ndarray):
+        def wij_at(x: np.ndarray) -> tuple[np.ndarray, csr_matrix]:
             """Scaled distances and B matrix at `x`, reusing the last result if it fits."""
             if last_eval[0] is None or not np.array_equal(last_eval[0], x):
                 last_eval[0] = np.array(x)

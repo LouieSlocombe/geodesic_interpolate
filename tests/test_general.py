@@ -35,7 +35,10 @@ CASES = [
 ]
 
 
-def assert_bond_lengths_equal(path, reference, cutoff=2.0, tol=1e-4):
+def assert_bond_lengths_equal(path: list[Atoms],
+                              reference: list[Atoms],
+                              cutoff: float = 2.0,
+                              tol: float = 1e-4) -> None:
     """Assert two paths agree on which atoms are bonded and how long those bonds are.
 
     Bond lengths survive the rigid-body motion that path alignment applies, so this holds
@@ -59,7 +62,7 @@ def assert_bond_lengths_equal(path, reference, cutoff=2.0, tol=1e-4):
         )
 
 
-def assert_paths_equal(path, reference, tol=1e-1):
+def assert_paths_equal(path: list[Atoms], reference: list[Atoms], tol: float = 1e-1) -> None:
     """Assert two paths hold the same atoms in the same places.
 
     Args:
@@ -74,7 +77,7 @@ def assert_paths_equal(path, reference, tol=1e-1):
 
 
 @pytest.mark.parametrize("case", CASES)
-def test_interpolate_from_file(case, tmp_path):
+def test_interpolate_from_file(case: str, tmp_path: Path) -> None:
     """A filename in, an XYZ path out, matching the stored reference."""
     output = tmp_path / "interpolated.xyz"
     gi.geodesic_interpolate(DATA / f"{case}.xyz", output=output)
@@ -85,7 +88,7 @@ def test_interpolate_from_file(case, tmp_path):
     assert_paths_equal(path, reference)
 
 
-def test_interpolate_from_atoms():
+def test_interpolate_from_atoms() -> None:
     """ASE Atoms in, ASE Atoms out, with no file involved on either side."""
     end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
 
@@ -97,7 +100,7 @@ def test_interpolate_from_atoms():
     assert_paths_equal(path, reference)
 
 
-def test_interpolation_is_reproducible(tmp_path):
+def test_interpolation_is_reproducible(tmp_path: Path) -> None:
     """The bisection is stochastic, so `seed` is what makes a run repeatable."""
     first, second = tmp_path / "first.xyz", tmp_path / "second.xyz"
 
@@ -107,7 +110,7 @@ def test_interpolation_is_reproducible(tmp_path):
     assert first.read_text() == second.read_text()
 
 
-def test_xyz_round_trip(tmp_path):
+def test_xyz_round_trip(tmp_path: Path) -> None:
     """Coordinates written to an XYZ file come back unchanged."""
     atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
     output = tmp_path / "round_trip.xyz"
@@ -119,7 +122,7 @@ def test_xyz_round_trip(tmp_path):
     assert np.allclose(coords_back, coords)
 
 
-def test_ase_round_trip():
+def test_ase_round_trip() -> None:
     """Coordinates converted to ASE Atoms and back come back unchanged."""
     atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
 
@@ -131,7 +134,7 @@ def test_ase_round_trip():
     assert np.allclose(coords_back, coords)
 
 
-def test_read_xyz_rejects_truncated_file(tmp_path):
+def test_read_xyz_rejects_truncated_file(tmp_path: Path) -> None:
     """A frame that ends early is a format error, not a silently short geometry."""
     truncated = tmp_path / "truncated.xyz"
     truncated.write_text("3\ncomment\n C 0.0 0.0 0.0\n")  # Claims three atoms, holds one
@@ -140,7 +143,7 @@ def test_read_xyz_rejects_truncated_file(tmp_path):
         gi.read_xyz(truncated)
 
 
-def test_read_xyz_rejects_empty_file(tmp_path):
+def test_read_xyz_rejects_empty_file(tmp_path: Path) -> None:
     """A file with no frames in it is an error rather than an empty path."""
     empty = tmp_path / "empty.xyz"
     empty.write_text("")
@@ -149,7 +152,7 @@ def test_read_xyz_rejects_empty_file(tmp_path):
         gi.read_xyz(empty)
 
 
-def test_periodic_input_keeps_its_cell():
+def test_periodic_input_keeps_its_cell() -> None:
     """A periodic system keeps its cell, and comes back in the frame that cell describes."""
     end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
     molecular = gi.geodesic_interpolate(end_points, n_images=5)
@@ -172,7 +175,7 @@ def test_periodic_input_keeps_its_cell():
     assert_bond_lengths_equal(path, molecular, tol=1e-10)
 
 
-def test_non_periodic_input_is_left_in_the_optimizer_frame():
+def test_non_periodic_input_is_left_in_the_optimizer_frame() -> None:
     """The frame is only restored for periodic input, so molecules are unaffected."""
     end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
 
@@ -183,7 +186,7 @@ def test_non_periodic_input_is_left_in_the_optimizer_frame():
     assert np.allclose(path[0].get_positions().mean(axis=0), 0.0, atol=1e-8)
 
 
-def test_constraints_are_carried_over_without_moving_atoms():
+def test_constraints_are_carried_over_without_moving_atoms() -> None:
     """A constraint has to survive for the NEB, without ASE applying it to the path."""
     end_points = read(DATA / "H+CH4_CH3+H2.xyz", index=':')
     unconstrained = gi.geodesic_interpolate(end_points, n_images=5)
@@ -200,7 +203,7 @@ def test_constraints_are_carried_over_without_moving_atoms():
     assert_paths_equal(constrained, unconstrained, tol=1e-12)
 
 
-def test_to_ase_atoms_rejects_mismatched_template():
+def test_to_ase_atoms_rejects_mismatched_template() -> None:
     """A template for a different system would silently override the requested symbols."""
     atom_names, coords = gi.read_xyz(DATA / "H+CH4_CH3+H2.xyz")
     template = Atoms(symbols=['Ar'] * len(atom_names), positions=coords[0])
@@ -214,7 +217,7 @@ def test_to_ase_atoms_rejects_mismatched_template():
 # so these run periodically, as the slab is meant to be.
 
 @pytest.mark.slow
-def test_neb_on_slab_adatom():
+def test_neb_on_slab_adatom() -> None:
     """Interpolate an adatom hopping across a Pt step, then relax the path with NEB."""
     n_images = 15
 
@@ -255,7 +258,7 @@ def test_neb_on_slab_adatom():
 
 
 @pytest.mark.slow
-def test_neb_on_ethane_rotation():
+def test_neb_on_ethane_rotation() -> None:
     """Interpolate a methyl rotation in ethane, then relax the path with NEB."""
     n_images = 15
 

@@ -7,7 +7,7 @@ that make up the coordinates, evaluation of those coordinates together with thei
 Cartesian derivatives (the Wilson B matrix), and the scaling functions that define
 the metric.
 """
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from itertools import pairwise
 
 import numpy as np
@@ -16,7 +16,7 @@ from scipy.sparse import coo_matrix, csr_matrix, identity, triu
 from scipy.spatial import KDTree
 
 
-def align_path(path: np.ndarray) -> tuple[float, np.ndarray]:
+def align_path(path: np.ndarray | list[np.ndarray]) -> tuple[float, np.ndarray]:
     """Rotate and translate the images of a path to minimise RMSD movement along it.
 
     The first image is shifted so its geometric centre sits at the origin, and each
@@ -146,13 +146,13 @@ def _pairs_within_three_bonds(tree: KDTree, n_atoms: int, bond_threshold: float)
     return list(zip(reach.row.tolist(), reach.col.tolist()))
 
 
-def get_bond_list(geom: np.ndarray,
+def get_bond_list(geom: np.ndarray | list[np.ndarray],
                   atoms: list[str] | None = None,
                   threshold: float = 4.0,
                   min_neighbors: int = 4,
                   snapshots: int = 30,
                   bond_threshold: float = 1.8,
-                  enforce: tuple[tuple[int, int], ...] = (),
+                  enforce: Iterable[tuple[int, int]] = (),
                   rng: np.random.Generator | None = None) -> tuple[list[tuple[int, int]], np.ndarray]:
     """Get the list of atom pairs that define the internal coordinate system.
 
@@ -248,11 +248,13 @@ def get_bond_list(geom: np.ndarray,
 # last few are kept around.  A strong reference to the list is held alongside its `id`,
 # which is what makes the identity check sound: the list cannot be collected and have
 # its address handed to something else while the entry lives.
-_PAIR_INDEX_CACHE: dict = {}
+_PAIR_INDEX_CACHE: dict[tuple[int, int, int],
+                        tuple[list[tuple[int, int]], np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
 _PAIR_INDEX_CACHE_SIZE = 8
 
 
-def _pair_index(rij_list: list[tuple[int, int]], n_atoms: int) -> tuple[np.ndarray, ...]:
+def _pair_index(rij_list: list[tuple[int, int]],
+                n_atoms: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build, or look up, the index arrays describing a pair list.
 
     Args:
@@ -361,7 +363,7 @@ def compute_wij(geom: np.ndarray,
     return wij, b_mat
 
 
-def morse_scaler(re: float = 1.5, alpha: float = 1.7,
+def morse_scaler(re: float | np.ndarray = 1.5, alpha: float = 1.7,
                  beta: float = 0.01) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Build a scaling function based on a Morse potential.
 
@@ -393,7 +395,7 @@ def morse_scaler(re: float = 1.5, alpha: float = 1.7,
     return scaler
 
 
-def elu_scaler(re: float = 2.0, alpha: float = 2.0,
+def elu_scaler(re: float | np.ndarray = 2.0, alpha: float = 2.0,
                beta: float = 0.01) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Build a scaling function with an exponential tail and a linear core.
 
